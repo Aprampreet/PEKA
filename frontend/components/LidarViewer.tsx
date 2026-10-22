@@ -27,6 +27,8 @@ interface LidarViewerProps {
   pcdUrl?: string;
 }
 
+const PCD_CAPTURE_SECONDS = 10;
+
 export const LidarViewer: React.FC<LidarViewerProps> = ({
   selectedCandidateCoords,
   pcdUrl = "/map.pcd",
@@ -59,10 +61,10 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     size: [number, number, number];
   } | null>(null);
 
-  // Live Continuous PCD Auto-Update State
+  // Live Continuous PCD Auto-Update State (10-second ROS 2 Point-LIO SLAM captures)
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(true);
   const [isCapturingPcd, setIsCapturingPcd] = useState<boolean>(false);
-  const [captureSecondsLeft, setCaptureSecondsLeft] = useState<number>(30);
+  const [captureSecondsLeft, setCaptureSecondsLeft] = useState<number>(PCD_CAPTURE_SECONDS);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [lastCaptureInfo, setLastCaptureInfo] = useState<{
     timestamp: string;
@@ -163,12 +165,12 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     [applyParsedPCD]
   );
 
-  // 30-Second Live PCD Capture Handler
+  // 10-Second Live PCD Capture Handler
   const handleCapturePcd = useCallback(async () => {
     if (isCapturingRef.current) return;
     isCapturingRef.current = true;
     setIsCapturingPcd(true);
-    setCaptureSecondsLeft(30);
+    setCaptureSecondsLeft(PCD_CAPTURE_SECONDS);
     setCaptureError(null);
 
     const controller = new AbortController();
@@ -205,7 +207,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
       clearInterval(interval);
       const msg = err instanceof Error ? err.message : String(err);
       if (!msg.includes("AbortError")) {
-        setCaptureError(msg || "Failed to capture 30s PCD from LiDAR topic.");
+        setCaptureError(msg || "Failed to capture 10s PCD from LiDAR topic.");
       }
     } finally {
       clearInterval(interval);
@@ -225,12 +227,12 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
       await handleCapturePcd();
       if (isCancelled || !autoSyncEnabled) return;
 
-      // 3.5s cooldown before starting next 30s capture
+      // 2.0s cooldown before starting next 10s capture
       loopTimeout = setTimeout(() => {
         if (!isCancelled && autoSyncEnabled) {
           cycle();
         }
-      }, 3500);
+      }, 2000);
     };
 
     if (autoSyncEnabled) {
@@ -667,7 +669,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
             onClick={handleCapturePcd}
             disabled={isCapturingPcd}
             className="p-1.5 rounded-md border border-[#30363D] bg-[#21262D] text-slate-300 hover:text-white hover:border-slate-500 transition cursor-pointer disabled:opacity-40"
-            title="Force immediate 30s cloud sync"
+            title="Force immediate 10s cloud sync"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isCapturingPcd ? "animate-spin text-emerald-400" : ""}`} />
           </button>
@@ -697,7 +699,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
         <div className="absolute top-[41px] left-0 right-0 h-[2px] bg-slate-800/80 z-20 overflow-hidden pointer-events-none">
           <div
             className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300 transition-all duration-1000 shadow-[0_0_8px_#34d399]"
-            style={{ width: `${((30 - captureSecondsLeft) / 30) * 100}%` }}
+            style={{ width: `${((PCD_CAPTURE_SECONDS - captureSecondsLeft) / PCD_CAPTURE_SECONDS) * 100}%` }}
           />
         </div>
       )}

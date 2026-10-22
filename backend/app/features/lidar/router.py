@@ -17,7 +17,7 @@ async def get_lidar_status():
 @router.get("/api/lidar/capture.pcd")
 async def capture_pcd():
     """
-    Starts a 30-second capture of incoming ROS 2 sensor_msgs/msg/PointCloud2 messages
+    Starts a 10-second capture of incoming ROS 2 sensor_msgs/msg/PointCloud2 messages
     and returns the combined XYZ coordinates as a downloadable binary PCD file.
     Proxies to upstream robot GET /api/lidar/capture.pcd.
     """

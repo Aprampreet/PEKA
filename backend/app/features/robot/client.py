@@ -484,7 +484,7 @@ class RobotApiClient:
 
     async def capture_pcd(self):
         """
-        Proxies GET /api/lidar/capture.pcd to upstream robot bridge (30s capture).
+        Proxies GET /api/lidar/capture.pcd to upstream robot bridge (10s Point-LIO SLAM capture).
         Saves the captured PCD to frontend/public/map.pcd.
         If upstream is unavailable, provides the fallback PCD from frontend/public/map.pcd.
         """
@@ -499,7 +499,7 @@ class RobotApiClient:
         try:
             resp = await client.get(
                 f"{upstream_url}/api/lidar/capture.pcd",
-                timeout=httpx.Timeout(60.0, connect=2.0)
+                timeout=httpx.Timeout(30.0, connect=2.0)
             )
             if resp.status_code == 200:
                 frame_id = resp.headers.get("X-PointCloud-Frame-Id", "camera_init")
@@ -513,7 +513,7 @@ class RobotApiClient:
                 event_logger.log(
                     category="camera",
                     level="success",
-                    message=f"Live 30s Point-LIO PCD captured ({len(content)//1024} KB, frame: {frame_id})."
+                    message=f"Live 10s Point-LIO PCD captured ({len(content)//1024} KB, frame: {frame_id})."
                 )
                 return Response(
                     content=content,
@@ -539,7 +539,7 @@ class RobotApiClient:
             event_logger.log(
                 category="camera",
                 level="info",
-                message=f"Upstream 30s PCD capture timed out/unavailable ({str(e)[:40]}). Serving cached map.",
+                message=f"Upstream 10s PCD capture timed out/unavailable ({str(e)[:40]}). Serving cached map.",
                 is_simulated=True
             )
 
