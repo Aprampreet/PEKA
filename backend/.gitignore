@@ -13,3 +13,10 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local databases & test evidence
+data/evidence/
+*.db
+*.db-wal
+*.db-shm
+
