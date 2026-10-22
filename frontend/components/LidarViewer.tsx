@@ -27,7 +27,7 @@ interface LidarViewerProps {
   pcdUrl?: string;
 }
 
-const PCD_CAPTURE_SECONDS = 30;
+const PCD_CAPTURE_SECONDS = 10;
 
 export const LidarViewer: React.FC<LidarViewerProps> = ({
   selectedCandidateCoords,
