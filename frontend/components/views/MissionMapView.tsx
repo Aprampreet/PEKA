@@ -80,7 +80,7 @@ export const MissionMapView: React.FC<MissionMapViewProps> = ({
             onSelectObservation={onSelectObservation}
           />
         ) : (
-          <div className="rounded-md border border-[#D8D9D1] bg-[#121411] p-1">
+          <div className="rounded-lg border border-[#232832] bg-[#07080a] shadow-xl overflow-hidden">
             <LidarViewer />
           </div>
         )}

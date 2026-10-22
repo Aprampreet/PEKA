@@ -212,54 +212,59 @@ class RobotApiClient:
         upstream_url = settings.piper_robot_api_url.rstrip("/")
         from app.features.camera.perception import perception_engine
         frame_counter = 0
+        last_upstream_attempt = 0.0
+        retry_cooldown = 6.0  # seconds between probe attempts to upstream tunnel
 
         while True:
-            try:
-                client = await self.get_client()
-                async with client.stream(
-                    "GET",
-                    f"{upstream_url}/api/camera/stream",
-                    timeout=None
-                ) as response:
-                    if response.status_code == 200:
-                        event_logger.log(
-                            category="camera",
-                            level="info",
-                            message="Connected to live upstream MJPEG camera stream."
-                        )
-                        buffer = bytearray()
-                        async for chunk in response.aiter_raw():
-                            buffer.extend(chunk)
-                            while True:
-                                start = buffer.find(b"\xff\xd8")
-                                if start == -1:
-                                    buffer.clear()
-                                    break
-                                if start > 0:
-                                    buffer = buffer[start:]
-                                    start = 0
-                                end = buffer.find(b"\xff\xd9", 2)
-                                if end == -1:
-                                    break
-                                raw_frame = bytes(buffer[: end + 2])
-                                buffer = buffer[end + 2 :]
-                                try:
-                                    processed = perception_engine.process_frame(raw_frame)
-                                except Exception:
-                                    processed = raw_frame
-                                header = (
-                                    b"--frame\r\n"
-                                    b"Content-Type: image/jpeg\r\n"
-                                    b"Content-Length: " + str(len(processed)).encode("ascii") + b"\r\n\r\n"
-                                )
-                                yield header + processed + b"\r\n"
-                                await asyncio.sleep(0)
-            except (asyncio.CancelledError, GeneratorExit):
-                return
-            except Exception:
-                pass
+            now = time.time()
+            if now - last_upstream_attempt >= retry_cooldown:
+                last_upstream_attempt = now
+                try:
+                    client = await self.get_client()
+                    async with client.stream(
+                        "GET",
+                        f"{upstream_url}/api/camera/stream",
+                        timeout=httpx.Timeout(connect=1.5, read=None, write=2.0, pool=2.0)
+                    ) as response:
+                        if response.status_code == 200:
+                            event_logger.log(
+                                category="camera",
+                                level="info",
+                                message="Connected to live upstream MJPEG camera stream."
+                            )
+                            buffer = bytearray()
+                            async for chunk in response.aiter_raw():
+                                buffer.extend(chunk)
+                                while True:
+                                    start = buffer.find(b"\xff\xd8")
+                                    if start == -1:
+                                        buffer.clear()
+                                        break
+                                    if start > 0:
+                                        buffer = buffer[start:]
+                                        start = 0
+                                    end = buffer.find(b"\xff\xd9", 2)
+                                    if end == -1:
+                                        break
+                                    raw_frame = bytes(buffer[: end + 2])
+                                    buffer = buffer[end + 2 :]
+                                    try:
+                                        processed = perception_engine.process_frame(raw_frame)
+                                    except Exception:
+                                        processed = raw_frame
+                                    header = (
+                                        b"--frame\r\n"
+                                        b"Content-Type: image/jpeg\r\n"
+                                        b"Content-Length: " + str(len(processed)).encode("ascii") + b"\r\n\r\n"
+                                    )
+                                    yield header + processed + b"\r\n"
+                                    await asyncio.sleep(0)
+                except (asyncio.CancelledError, GeneratorExit):
+                    return
+                except Exception:
+                    pass
 
-            # Standby generator if upstream is temporarily unreachable, retries connection every loop
+            # Standby generator if upstream is temporarily unreachable, retries connection on cooldown
             try:
                 frame_counter += 1
                 raw_frame = self._create_test_frame(frame_counter)
@@ -273,7 +278,7 @@ class RobotApiClient:
                     b"Content-Length: " + str(len(processed)).encode("ascii") + b"\r\n\r\n"
                 )
                 yield header + processed + b"\r\n"
-                await asyncio.sleep(0.08)
+                await asyncio.sleep(0.06)
             except (asyncio.CancelledError, GeneratorExit):
                 return
 
@@ -286,42 +291,47 @@ class RobotApiClient:
         upstream_url = settings.piper_robot_api_url.rstrip("/")
         from app.features.camera.perception import perception_engine
         frame_counter = 0
+        last_upstream_attempt = 0.0
+        retry_cooldown = 6.0
 
         while True:
-            try:
-                client = await self.get_client()
-                async with client.stream(
-                    "GET",
-                    f"{upstream_url}/api/camera/stream",
-                    timeout=None
-                ) as response:
-                    if response.status_code == 200:
-                        buffer = bytearray()
-                        async for chunk in response.aiter_raw():
-                            buffer.extend(chunk)
-                            while True:
-                                start = buffer.find(b"\xff\xd8")
-                                if start == -1:
-                                    buffer.clear()
-                                    break
-                                if start > 0:
-                                    buffer = buffer[start:]
-                                    start = 0
-                                end = buffer.find(b"\xff\xd9", 2)
-                                if end == -1:
-                                    break
-                                raw_frame = bytes(buffer[: end + 2])
-                                buffer = buffer[end + 2 :]
-                                try:
-                                    processed = perception_engine.process_frame(raw_frame)
-                                except Exception:
-                                    processed = raw_frame
-                                yield processed
-                                await asyncio.sleep(0)
-            except (asyncio.CancelledError, GeneratorExit):
-                return
-            except Exception:
-                pass
+            now = time.time()
+            if now - last_upstream_attempt >= retry_cooldown:
+                last_upstream_attempt = now
+                try:
+                    client = await self.get_client()
+                    async with client.stream(
+                        "GET",
+                        f"{upstream_url}/api/camera/stream",
+                        timeout=httpx.Timeout(connect=1.5, read=None, write=2.0, pool=2.0)
+                    ) as response:
+                        if response.status_code == 200:
+                            buffer = bytearray()
+                            async for chunk in response.aiter_raw():
+                                buffer.extend(chunk)
+                                while True:
+                                    start = buffer.find(b"\xff\xd8")
+                                    if start == -1:
+                                        buffer.clear()
+                                        break
+                                    if start > 0:
+                                        buffer = buffer[start:]
+                                        start = 0
+                                    end = buffer.find(b"\xff\xd9", 2)
+                                    if end == -1:
+                                        break
+                                    raw_frame = bytes(buffer[: end + 2])
+                                    buffer = buffer[end + 2 :]
+                                    try:
+                                        processed = perception_engine.process_frame(raw_frame)
+                                    except Exception:
+                                        processed = raw_frame
+                                    yield processed
+                                    await asyncio.sleep(0)
+                except (asyncio.CancelledError, GeneratorExit):
+                    return
+                except Exception:
+                    pass
 
             # Standby generator if upstream is temporarily unreachable, auto-retrying upstream
             try:
@@ -332,7 +342,7 @@ class RobotApiClient:
                 except Exception:
                     processed = raw_frame
                 yield processed
-                await asyncio.sleep(0.08)
+                await asyncio.sleep(0.06)
             except (asyncio.CancelledError, GeneratorExit):
                 return
 

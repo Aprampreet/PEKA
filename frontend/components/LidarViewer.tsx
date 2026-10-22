@@ -1,778 +1,796 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   RotateCcw,
-  ZoomIn,
-  ZoomOut,
   Box,
   Maximize2,
   Minimize2,
-  Radio,
-  Layers,
-  Palette,
-  Eye,
+  Crosshair,
+  Compass,
+  Navigation,
+  Scan,
 } from "lucide-react";
-import { api } from "../lib/api";
-
-interface LidarPoint {
-  x: number;
-  y: number;
-  z: number;
-  intensity: number;
-}
+import { parsePCD, ParsedPCD, elevationToColor, MapColorPalette } from "../lib/pcdParser";
+import { useDashboard } from "../lib/DashboardContext";
 
 interface LidarViewerProps {
   selectedCandidateCoords?: { x: number; y: number; z: number } | null;
+  pcdUrl?: string;
 }
-
-// Byte readers for ROS PointField datatypes as specified in piper.pointcloud.v1
-const fieldReaders: Record<number, (v: DataView, o: number, le: boolean) => number> = {
-  1: (v, o) => v.getInt8(o),
-  2: (v, o) => v.getUint8(o),
-  3: (v, o, le) => v.getInt16(o, le),
-  4: (v, o, le) => v.getUint16(o, le),
-  5: (v, o, le) => v.getInt32(o, le),
-  6: (v, o, le) => v.getUint32(o, le),
-  7: (v, o, le) => v.getFloat32(o, le),
-  8: (v, o, le) => v.getFloat64(o, le),
-};
-
-function decodeCloud(buffer: ArrayBuffer): { metadata: any; points: LidarPoint[] } {
-  const view = new DataView(buffer);
-  const metadataSize = view.getUint32(0, false);
-  const metadata = JSON.parse(
-    new TextDecoder().decode(new Uint8Array(buffer, 4, metadataSize))
-  );
-  const payloadOffset = 4 + metadataSize;
-  const fields = Object.fromEntries(metadata.fields.map((f: any) => [f.name, f]));
-
-  for (const name of ["x", "y", "z"]) {
-    if (!fields[name] || !fieldReaders[fields[name].datatype]) {
-      throw new Error(`Cloud has no supported ${name} field`);
-    }
-  }
-
-  const littleEndian = !metadata.is_bigendian;
-  const count = metadata.point_count || 0;
-  const pts: LidarPoint[] = new Array(count);
-
-  const xField = fields["x"];
-  const yField = fields["y"];
-  const zField = fields["z"];
-  const intensityField = fields["intensity"];
-
-  const readX = fieldReaders[xField.datatype];
-  const readY = fieldReaders[yField.datatype];
-  const readZ = fieldReaders[zField.datatype];
-  const readIntensity = intensityField ? fieldReaders[intensityField.datatype] : null;
-
-  for (let i = 0; i < count; i++) {
-    const record = payloadOffset + i * metadata.point_step;
-    const x = readX(view, record + xField.offset, littleEndian);
-    const y = readY(view, record + yField.offset, littleEndian);
-    const z = readZ(view, record + zField.offset, littleEndian);
-    const intensity = readIntensity
-      ? readIntensity(view, record + intensityField.offset, littleEndian)
-      : 0.8;
-    pts[i] = { x, y, z, intensity };
-  }
-  return { metadata, points: pts };
-}
-
-// 4x4 Matrix Utilities for WebGL Orbit Projection
-function createPerspectiveMatrix(fovyRad: number, aspect: number, near: number, far: number): Float32Array {
-  const f = 1.0 / Math.tan(fovyRad / 2.0);
-  const out = new Float32Array(16);
-  out[0] = f / aspect;
-  out[5] = f;
-  out[10] = (far + near) / (near - far);
-  out[11] = -1.0;
-  out[14] = (2.0 * far * near) / (near - far);
-  return out;
-}
-
-function createLookAtMatrix(eye: number[], center: number[], up: number[]): Float32Array {
-  const fx = center[0] - eye[0];
-  const fy = center[1] - eye[1];
-  const fz = center[2] - eye[2];
-  const rlen = 1.0 / Math.hypot(fx, fy, fz);
-  const fNx = fx * rlen;
-  const fNy = fy * rlen;
-  const fNz = fz * rlen;
-
-  const sx = fNy * up[2] - fNz * up[1];
-  const sy = fNz * up[0] - fNx * up[2];
-  const sz = fNx * up[1] - fNy * up[0];
-  const slen = 1.0 / Math.hypot(sx, sy, sz);
-  const sNx = sx * slen;
-  const sNy = sy * slen;
-  const sNz = sz * slen;
-
-  const ux = sNy * fNz - sNz * fNy;
-  const uy = sNz * fNx - sNx * fNz;
-  const uz = sNx * fNy - sNy * fNx;
-
-  const out = new Float32Array(16);
-  out[0] = sNx;
-  out[1] = ux;
-  out[2] = -fNx;
-  out[3] = 0;
-
-  out[4] = sNy;
-  out[5] = uy;
-  out[6] = -fNy;
-  out[7] = 0;
-
-  out[8] = sNz;
-  out[9] = uz;
-  out[10] = -fNz;
-  out[11] = 0;
-
-  out[12] = -(sNx * eye[0] + sNy * eye[1] + sNz * eye[2]);
-  out[13] = -(ux * eye[0] + uy * eye[1] + uz * eye[2]);
-  out[14] = fNx * eye[0] + fNy * eye[1] + fNz * eye[2];
-  out[15] = 1;
-  return out;
-}
-
-function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
-  const out = new Float32Array(16);
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < 4; j++) {
-      out[j * 4 + i] =
-        a[0 * 4 + i] * b[j * 4 + 0] +
-        a[1 * 4 + i] * b[j * 4 + 1] +
-        a[2 * 4 + i] * b[j * 4 + 2] +
-        a[3 * 4 + i] * b[j * 4 + 3];
-    }
-  }
-  return out;
-}
-
-// WebGL Shaders with exact RViz AxisColor Z Rainbow Colormap
-const VS_SOURCE = `
-attribute vec3 a_position;
-attribute float a_intensity;
-uniform mat4 u_mvp;
-uniform float u_pointSize;
-varying float v_z;
-varying float v_intensity;
-
-void main() {
-    gl_Position = u_mvp * vec4(a_position, 1.0);
-    gl_PointSize = u_pointSize;
-    v_z = a_position.z;
-    v_intensity = a_intensity;
-}
-`;
-
-const FS_SOURCE = `
-precision mediump float;
-varying float v_z;
-varying float v_intensity;
-uniform float u_minZ;
-uniform float u_maxZ;
-uniform int u_colorMode; // 0 = AxisColor Z (Rainbow Jet), 1 = Tactical Intensity
-
-void main() {
-    if (u_colorMode == 0) {
-        // Exact RViz AxisColor Z Rainbow Jet colormap
-        float t = clamp((v_z - u_minZ) / max(0.01, u_maxZ - u_minZ), 0.0, 1.0);
-        vec3 color;
-        if (t < 0.2) {
-            float s = t / 0.2;
-            color = vec3(1.0, s * 0.5, 0.0); // Red to Orange
-        } else if (t < 0.4) {
-            float s = (t - 0.2) / 0.2;
-            color = vec3(1.0, 0.5 + s * 0.5, 0.0); // Orange to Yellow
-        } else if (t < 0.6) {
-            float s = (t - 0.4) / 0.2;
-            color = vec3(1.0 - s, 1.0, s * 0.8); // Yellow to Green/Cyan
-        } else if (t < 0.8) {
-            float s = (t - 0.6) / 0.2;
-            color = vec3(0.0, 1.0 - s * 0.6, 0.8 + s * 0.2); // Cyan to Royal Blue
-        } else {
-            float s = (t - 0.8) / 0.2;
-            color = vec3(s * 0.85, 0.2 * (1.0 - s), 1.0); // Blue to Violet/Magenta
-        }
-        gl_FragColor = vec4(color, 1.0);
-    } else {
-        // Tactical monochrome green intensity
-        float intensity = clamp(v_intensity, 0.3, 1.0);
-        gl_FragColor = vec4(intensity * 0.2, intensity * 0.85, intensity * 0.4, 1.0);
-    }
-}
-`;
-
-const MAX_ACCUMULATED_POINTS = 300000;
 
 export const LidarViewer: React.FC<LidarViewerProps> = ({
   selectedCandidateCoords,
+  pcdUrl = "/map.pcd",
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const glRef = useRef<WebGLRenderingContext | null>(null);
-  const programRef = useRef<WebGLProgram | null>(null);
-  const bufferRef = useRef<WebGLBuffer | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const pointsMeshRef = useRef<THREE.Points | null>(null);
+  const robotGroupRef = useRef<THREE.Group | null>(null);
+  const lidarSweepMeshRef = useRef<THREE.Mesh | null>(null);
+  const trajectoryLineRef = useRef<THREE.Line | null>(null);
+  const animFrameIdRef = useRef<number | null>(null);
 
-  // Big Buffer for 2.8 Lakh Points (x, y, z floats)
-  const accumulatedPointsRef = useRef<Float32Array>(new Float32Array(MAX_ACCUMULATED_POINTS * 3));
-  const accumulatedIntensitiesRef = useRef<Float32Array>(new Float32Array(MAX_ACCUMULATED_POINTS));
-  const activeCountRef = useRef<number>(0);
-  const messageCountRef = useRef<number>(359); // Initial matching RViz 359 messages
+  const { mapData, robotStatus, robotInfo } = useDashboard();
 
-  const [displayCount, setDisplayCount] = useState<number>(278143);
-  const [messagesReceived, setMessagesReceived] = useState<number>(359);
-  const [isLiveStream, setIsLiveStream] = useState<boolean>(false);
-  const [liveHz, setLiveHz] = useState<number>(11.9);
-  const [frameId, setFrameId] = useState<string>("camera_init");
+  // State
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadProgress, setLoadProgress] = useState<number>(0);
+  const [pointCount, setPointCount] = useState<number>(0);
+  const [colorMode, setColorMode] = useState<MapColorPalette>("monochrome");
+  const [pointSize, setPointSize] = useState<number>(0.065);
+  const [isFollowingRobot, setIsFollowingRobot] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [colorMode, setColorMode] = useState<"rainbow" | "tactical">("rainbow");
-  const [accumulateMode, setAccumulateMode] = useState<boolean>(true);
+  const [cameraPreset, setCameraPreset] = useState<"orbit" | "topdown" | "follow">("orbit");
+  const [mapBounds, setMapBounds] = useState<{
+    min: [number, number, number];
+    max: [number, number, number];
+    center: [number, number, number];
+    size: [number, number, number];
+  } | null>(null);
 
-  // Camera Orbit / Navigation
-  const cameraRef = useRef<{
-    yaw: number;
-    pitch: number;
-    distance: number;
-    target: [number, number, number];
-    isDragging: boolean;
-    isPanning: boolean;
-    lastMouse: { x: number; y: number };
-  }>({
-    yaw: -0.85,
-    pitch: 0.55,
-    distance: 7.2,
-    target: [0.0, 0.0, 0.9],
-    isDragging: false,
-    isPanning: false,
-    lastMouse: { x: 0, y: 0 },
+  const [livePose, setLivePose] = useState<{ x: number; y: number; z: number; yawDeg: number }>({
+    x: 0,
+    y: 0,
+    z: 0.15,
+    yawDeg: 0,
   });
 
-  const lastPacketTimeRef = useRef<number>(0);
-  const packetCountRef = useRef<number>(0);
-  const wsRef = useRef<WebSocket | null>(null);
+  const parsedPCDRef = useRef<ParsedPCD | null>(null);
+  const trajectoryCoordsRef = useRef<number[]>([]);
 
-  // Generate realistic 2.78 Lakh points room scan (RViz Point-LIO match)
-  const buildRealisticRoomDataset = useCallback(() => {
-    const coords = accumulatedPointsRef.current;
-    const ints = accumulatedIntensitiesRef.current;
-    let ptr = 0;
-    let intPtr = 0;
+  // Palettes definition for user selector
+  const PALETTES: { id: MapColorPalette; label: string; preview: string; desc: string }[] = useMemo(
+    () => [
+      {
+        id: "monochrome",
+        label: "Stealth Gray",
+        preview: "from-zinc-900 via-slate-400 to-white",
+        desc: "Tactical Charcoal & Silver Monochrome",
+      },
+      {
+        id: "cyber_slate",
+        label: "Cyber Slate",
+        preview: "from-slate-900 via-sky-600 to-cyan-300",
+        desc: "Graphite with Icy Cyan Highlights",
+      },
+      {
+        id: "tactical_amber",
+        label: "Amber Alert",
+        preview: "from-stone-900 via-amber-600 to-yellow-300",
+        desc: "Matte Carbon with Warm Bronze & Gold",
+      },
+      {
+        id: "matrix_emerald",
+        label: "Night Vision",
+        preview: "from-neutral-900 via-emerald-700 to-emerald-300",
+        desc: "Military FLIR Night-Vision Green",
+      },
+      {
+        id: "rainbow",
+        label: "RViz Rainbow",
+        preview: "from-blue-600 via-emerald-400 to-red-500",
+        desc: "Standard Jet Spectrum",
+      },
+    ],
+    []
+  );
 
-    const addPt = (x: number, y: number, z: number, intensity: number) => {
-      if (ptr + 3 > MAX_ACCUMULATED_POINTS * 3) return;
-      coords[ptr++] = x;
-      coords[ptr++] = y;
-      coords[ptr++] = z;
-      ints[intPtr++] = intensity;
-    };
-
-    // 1. Dense Floor (-3.4m to 3.4m, -2.8m to 2.8m) -> ~80,000 points (Z: -0.05m to 0.05m)
-    for (let xi = -140; xi <= 140; xi += 1) {
-      for (let yi = -115; yi <= 115; yi += 1) {
-        if ((xi * xi + yi * yi) % 4 === 1) continue;
-        const x = xi * 0.024;
-        const y = yi * 0.024;
-        const z = Math.sin(x * 1.8 + y * 1.5) * 0.012 + (Math.random() - 0.5) * 0.008;
-        addPt(x, y, z, 0.35 + 0.15 * Math.sin(x));
+  // 1. Fetch & Parse PCD file
+  const loadPcdFile = useCallback(async (url: string) => {
+    setIsLoading(true);
+    setLoadProgress(15);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
       }
-    }
 
-    // 2. Perimeter Walls (Height: 0.0m to 2.4m) -> ~100,000 points
-    // Wall North (Y = 2.8m)
-    for (let xi = -140; xi <= 140; xi += 1) {
-      for (let zi = 0; zi <= 120; zi += 1) {
-        const x = xi * 0.024;
-        const z = zi * 0.02;
-        // Doorway cutout at x in [-0.8, 0.8] up to 2.0m
-        if (x > -0.8 && x < 0.8 && z < 2.0) continue;
-        const y = 2.8 + (Math.random() - 0.5) * 0.015;
-        addPt(x, y, z, 0.65 + 0.2 * (z / 2.4));
+      setLoadProgress(45);
+      const arrayBuffer = await response.arrayBuffer();
+
+      setLoadProgress(75);
+      const parsed = parsePCD(arrayBuffer, colorMode);
+      parsedPCDRef.current = parsed;
+
+      setPointCount(parsed.pointCount);
+      setMapBounds({
+        min: parsed.min,
+        max: parsed.max,
+        center: parsed.center,
+        size: parsed.size,
+      });
+
+      // Build Three.js Point Cloud
+      if (sceneRef.current) {
+        if (pointsMeshRef.current) {
+          sceneRef.current.remove(pointsMeshRef.current);
+          pointsMeshRef.current.geometry.dispose();
+          if (Array.isArray(pointsMeshRef.current.material)) {
+            pointsMeshRef.current.material.forEach((m) => m.dispose());
+          } else {
+            pointsMeshRef.current.material.dispose();
+          }
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(parsed.positions, 3));
+        geometry.setAttribute("color", new THREE.BufferAttribute(parsed.colors, 3));
+
+        const material = new THREE.PointsMaterial({
+          size: pointSize,
+          vertexColors: true,
+          sizeAttenuation: true,
+          transparent: true,
+          opacity: 0.96,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        sceneRef.current.add(points);
+        pointsMeshRef.current = points;
+
+        // Position initial camera to view entire facility in heroic isometric angle
+        if (cameraRef.current && controlsRef.current) {
+          const [cx, cy, cz] = parsed.center;
+          controlsRef.current.target.set(cx, cy, cz);
+          cameraRef.current.position.set(cx - 30, cy - 38, cz + 26);
+          controlsRef.current.update();
+        }
       }
+
+      setLoadProgress(100);
+    } catch (err) {
+      console.error("Error loading PCD file:", err);
+    } finally {
+      setIsLoading(false);
     }
+  }, [colorMode, pointSize]);
 
-    // Wall South (Y = -2.8m)
-    for (let xi = -140; xi <= 140; xi += 1) {
-      for (let zi = 0; zi <= 120; zi += 1) {
-        const x = xi * 0.024;
-        const z = zi * 0.02;
-        const y = -2.8 + (Math.random() - 0.5) * 0.015;
-        addPt(x, y, z, 0.65 + 0.2 * (z / 2.4));
-      }
-    }
-
-    // Wall West (X = -3.4m)
-    for (let yi = -115; yi <= 115; yi += 1) {
-      for (let zi = 0; zi <= 120; zi += 1) {
-        const y = yi * 0.024;
-        const z = zi * 0.02;
-        // Window opening
-        if (y > -1.2 && y < 1.2 && z > 0.9 && z < 1.8) continue;
-        const x = -3.4 + (Math.random() - 0.5) * 0.015;
-        addPt(x, y, z, 0.70 + 0.2 * (z / 2.4));
-      }
-    }
-
-    // Wall East (X = 3.4m)
-    for (let yi = -115; yi <= 115; yi += 1) {
-      for (let zi = 0; zi <= 120; zi += 1) {
-        const y = yi * 0.024;
-        const z = zi * 0.02;
-        const x = 3.4 + (Math.random() - 0.5) * 0.015;
-        addPt(x, y, z, 0.70 + 0.2 * (z / 2.4));
-      }
-    }
-
-    // 3. Interior Laboratory Furniture / Structural Rubble (Z: 0.4m to 1.1m) -> ~50,000 points
-    // Table 1 (Left workbench: x: -2.6 to -1.0, y: -1.5 to 1.5, z: 0.85)
-    for (let xi = -108; xi <= -42; xi += 1) {
-      for (let yi = -60; yi <= 60; yi += 1) {
-        const x = xi * 0.024;
-        const y = yi * 0.024;
-        addPt(x, y, 0.85 + (Math.random() - 0.5) * 0.01, 0.82);
-      }
-    }
-
-    // Sector 3 Void Rubble / POI Cluster (x: 0.4, y: 1.5, z: 0.6)
-    for (let ri = 1; ri <= 30; ri++) {
-      const r = ri * 0.035;
-      const countOnRing = Math.floor(ri * 12);
-      for (let thi = 0; thi < countOnRing; thi++) {
-        const th = (thi / countOnRing) * Math.PI * 2;
-        const x = 0.4 + Math.cos(th) * r;
-        const y = 1.5 + Math.sin(th) * r;
-        const z = Math.max(0.04, 0.95 - r * 0.85) + (Math.random() - 0.5) * 0.02;
-        addPt(x, y, z, 0.95);
-      }
-    }
-
-    // 4. Ceiling Truss Grid (Z: 2.3m to 2.45m) -> ~45,000 points (Blue/Purple)
-    for (let xi = -130; xi <= 130; xi += 2) {
-      for (let yi = -110; yi <= 110; yi += 2) {
-        if ((xi + yi) % 3 === 0) continue;
-        const x = xi * 0.024;
-        const y = yi * 0.024;
-        const z = 2.4 + (Math.random() - 0.5) * 0.03;
-        addPt(x, y, z, 0.55);
-      }
-    }
-
-    const totalPts = Math.min(278143, Math.floor(ptr / 3));
-    activeCountRef.current = totalPts;
-    setDisplayCount(totalPts);
-  }, []);
-
-  // WebGL Initialization
+  // 2. Initialize Three.js Scene, Camera, Renderer, Controls
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    let gl = canvas.getContext("webgl", { antialias: true, alpha: false });
-    if (!gl) {
-      gl = canvas.getContext("experimental-webgl") as WebGLRenderingContext | null;
-    }
-    if (!gl) {
-      console.warn("WebGL not supported");
-      return;
-    }
-    glRef.current = gl;
+    const width = container.clientWidth || 640;
+    const height = container.clientHeight || 400;
 
-    // Compile Shaders
-    const createShader = (type: number, src: string) => {
-      const s = gl.createShader(type)!;
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      return s;
+    // Tactical Obsidian Scene with Fog
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x07080a); // Deep pitch obsidian black
+    scene.fog = new THREE.FogExp2(0x07080a, 0.0065); // Atmospheric depth fade
+    sceneRef.current = scene;
+
+    // Camera (Z is UP to strictly match Point-LIO / ROS 2 coordinate frame)
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 500);
+    camera.up.set(0, 0, 1);
+    camera.position.set(-20, -32, 22);
+    cameraRef.current = camera;
+
+    // WebGL Renderer with High-DPI support
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    container.innerHTML = "";
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    // Orbit Controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.screenSpacePanning = true;
+    controls.maxPolarAngle = Math.PI - 0.02;
+    controls.minDistance = 1.0;
+    controls.maxDistance = 280;
+    controlsRef.current = controls;
+
+    // ==========================================
+    // Tactical Ground Reference Grid & Radar Rings
+    // ==========================================
+    const groundZ = -1.9; // Lowest ground floor level
+
+    // High-tech Tactical Floor Grid (Charcoal & Graphite)
+    const gridHelper = new THREE.GridHelper(100, 50, 0x2e3542, 0x141820);
+    gridHelper.rotation.x = Math.PI / 2;
+    gridHelper.position.z = groundZ;
+    scene.add(gridHelper);
+
+    // Concentric Radar Distance Rings (10m, 20m, 30m, 40m, 50m)
+    const radarGroup = new THREE.Group();
+    radarGroup.name = "radarRings";
+    const ringRadii = [10, 20, 30, 40, 50];
+    ringRadii.forEach((r, idx) => {
+      const ringGeo = new THREE.RingGeometry(r - 0.05, r + 0.05, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: idx % 2 === 0 ? 0x2e3846 : 0x1f2630,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.6,
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.position.z = groundZ + 0.01;
+      radarGroup.add(ringMesh);
+    });
+
+    // Cardinal Axes on Ground Grid (Subtle Silver & Slate)
+    const cardinalMat = new THREE.LineBasicMaterial({ color: 0x3e495a, transparent: true, opacity: 0.7 });
+    const cardinalGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-50, 0, groundZ + 0.02),
+      new THREE.Vector3(50, 0, groundZ + 0.02),
+      new THREE.Vector3(0, -50, groundZ + 0.02),
+      new THREE.Vector3(0, 50, groundZ + 0.02),
+    ]);
+    const cardinalLines = new THREE.LineSegments(cardinalGeo, cardinalMat);
+    radarGroup.add(cardinalLines);
+    scene.add(radarGroup);
+
+    // Glowing Coordinate Origin Axes (X: Red, Y: Green, Z: Blue)
+    const axes = new THREE.AxesHelper(3.5);
+    axes.position.set(0, 0, groundZ + 0.03);
+    scene.add(axes);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.75);
+    dirLight.position.set(15, 25, 35);
+    scene.add(dirLight);
+
+    // ==========================================
+    // 3. Construct High-Tech 3D Robot & LiDAR Marker
+    // ==========================================
+    const robotGroup = new THREE.Group();
+    robotGroupRef.current = robotGroup;
+
+    // Base Pulsing Sonar Ring 1
+    const haloGeo1 = new THREE.RingGeometry(0.55, 0.82, 36);
+    const haloMat1 = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+    });
+    const haloMesh1 = new THREE.Mesh(haloGeo1, haloMat1);
+    haloMesh1.name = "halo1";
+    robotGroup.add(haloMesh1);
+
+    // Expanding Sonar Ring 2
+    const haloGeo2 = new THREE.RingGeometry(0.85, 1.15, 36);
+    const haloMat2 = new THREE.MeshBasicMaterial({
+      color: 0x94a3b8,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.45,
+    });
+    const haloMesh2 = new THREE.Mesh(haloGeo2, haloMat2);
+    haloMesh2.name = "halo2";
+    robotGroup.add(haloMesh2);
+
+    // Robot Armored Chassis Box (Dark Titanium / Gunmetal finish)
+    const bodyGeo = new THREE.BoxGeometry(0.72, 0.52, 0.28);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x141820,
+      roughness: 0.25,
+      metalness: 0.85,
+    });
+    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+    bodyMesh.position.z = 0.24;
+    robotGroup.add(bodyMesh);
+
+    // Chassis Top Armor Plate
+    const plateGeo = new THREE.BoxGeometry(0.55, 0.38, 0.06);
+    const plateMat = new THREE.MeshStandardMaterial({
+      color: 0x222834,
+      roughness: 0.3,
+      metalness: 0.7,
+    });
+    const plateMesh = new THREE.Mesh(plateGeo, plateMat);
+    plateMesh.position.z = 0.4;
+    robotGroup.add(plateMesh);
+
+    // Rotating LiDAR Sensor Turret (Livox / Velodyne style)
+    const domeGeo = new THREE.CylinderGeometry(0.14, 0.16, 0.18, 28);
+    const domeMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.9,
+      roughness: 0.2,
+      metalness: 0.8,
+    });
+    const domeMesh = new THREE.Mesh(domeGeo, domeMat);
+    domeMesh.name = "lidarDome";
+    domeMesh.rotation.x = Math.PI / 2;
+    domeMesh.position.z = 0.52;
+    robotGroup.add(domeMesh);
+
+    // Forward Direction Pointer Arrow (Bright Cyan)
+    const arrowGeo = new THREE.ConeGeometry(0.18, 0.48, 16);
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const arrowMesh = new THREE.Mesh(arrowGeo, arrowMat);
+    arrowMesh.rotation.z = -Math.PI / 2;
+    arrowMesh.rotation.x = Math.PI / 2;
+    arrowMesh.position.set(0.68, 0, 0.24);
+    robotGroup.add(arrowMesh);
+
+    // Forward LED Searchlights (Twin Cones)
+    const spotGeo = new THREE.ConeGeometry(0.8, 3.2, 16, 1, true);
+    const spotMat = new THREE.MeshBasicMaterial({
+      color: 0xf8fafc,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.DoubleSide,
+    });
+    const spotLeft = new THREE.Mesh(spotGeo, spotMat);
+    spotLeft.rotation.z = -Math.PI / 2;
+    spotLeft.rotation.x = Math.PI / 2;
+    spotLeft.position.set(1.9, -0.16, 0.3);
+    robotGroup.add(spotLeft);
+
+    const spotRight = new THREE.Mesh(spotGeo, spotMat);
+    spotRight.rotation.z = -Math.PI / 2;
+    spotRight.rotation.x = Math.PI / 2;
+    spotRight.position.set(1.9, 0.16, 0.3);
+    robotGroup.add(spotRight);
+
+    // Real-Time 360° LiDAR Dynamic Sweeping Scan Fan
+    const sweepGeo = new THREE.RingGeometry(0.5, 6.5, 32, 1, 0, Math.PI / 4);
+    const sweepMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide,
+    });
+    const sweepMesh = new THREE.Mesh(sweepGeo, sweepMat);
+    sweepMesh.name = "lidarSweep";
+    sweepMesh.position.z = 0.52;
+    robotGroup.add(sweepMesh);
+    lidarSweepMeshRef.current = sweepMesh;
+
+    scene.add(robotGroup);
+
+    // Trajectory Polyline (Stealth Silver / Cyan)
+    const trajGeo = new THREE.BufferGeometry();
+    const trajMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const trajLine = new THREE.Line(trajGeo, trajMat);
+    trajectoryLineRef.current = trajLine;
+    scene.add(trajLine);
+
+    // Load PCD
+    loadPcdFile(pcdUrl);
+
+    // Animation Loop
+    let clock = new THREE.Clock();
+    const animate = () => {
+      animFrameIdRef.current = requestAnimationFrame(animate);
+
+      const elapsedTime = clock.getElapsedTime();
+
+      // Pulsate ground sonar halos
+      const halo1 = robotGroup.getObjectByName("halo1") as THREE.Mesh;
+      if (halo1) {
+        const scale1 = 1.0 + Math.sin(elapsedTime * 4.0) * 0.15;
+        halo1.scale.set(scale1, scale1, 1);
+        (halo1.material as THREE.MeshBasicMaterial).opacity = 0.5 + Math.sin(elapsedTime * 4.0) * 0.35;
+      }
+
+      const halo2 = robotGroup.getObjectByName("halo2") as THREE.Mesh;
+      if (halo2) {
+        const scale2 = 1.0 + Math.cos(elapsedTime * 3.0) * 0.22;
+        halo2.scale.set(scale2, scale2, 1);
+        (halo2.material as THREE.MeshBasicMaterial).opacity = 0.25 + Math.cos(elapsedTime * 3.0) * 0.2;
+      }
+
+      // Rotate LiDAR Sensor Turret & Sweeping Fan (Simulates 10 Hz rotation)
+      const dome = robotGroup.getObjectByName("lidarDome") as THREE.Mesh;
+      if (dome) {
+        dome.rotation.y = elapsedTime * 8.0;
+      }
+      if (lidarSweepMeshRef.current) {
+        lidarSweepMeshRef.current.rotation.z = elapsedTime * 6.28; // Full continuous 360 sweep
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
     };
+    animate();
 
-    const vs = createShader(gl.VERTEX_SHADER, VS_SOURCE);
-    const fs = createShader(gl.FRAGMENT_SHADER, FS_SOURCE);
-    const program = gl.createProgram()!;
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    programRef.current = program;
+    // Resize Observer
+    const resizeObserver = new ResizeObserver(() => {
+      if (!container || !rendererRef.current || !cameraRef.current) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (w > 0 && h > 0) {
+        cameraRef.current.aspect = w / h;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(w, h);
+      }
+    });
+    resizeObserver.observe(container);
 
-    const buffer = gl.createBuffer();
-    bufferRef.current = buffer;
+    return () => {
+      resizeObserver.disconnect();
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+      }
+      controls.dispose();
+      renderer.dispose();
+    };
+  }, [loadPcdFile, pcdUrl]);
 
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
+  // 4. Update Colors when Palette Changes
+  useEffect(() => {
+    if (!parsedPCDRef.current || !pointsMeshRef.current) return;
+    const { positions, min, max, pointCount } = parsedPCDRef.current;
+    const colors = new Float32Array(pointCount * 3);
 
-    buildRealisticRoomDataset();
-    renderWebGL();
-  }, [buildRealisticRoomDataset]);
-
-  // WebGL Render Loop
-  const renderWebGL = useCallback(() => {
-    const canvas = canvasRef.current;
-    const gl = glRef.current;
-    const program = programRef.current;
-    const buffer = bufferRef.current;
-    if (!canvas || !gl || !program || !buffer) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-    gl.viewport(0, 0, width, height);
-
-    // Dark RViz viewport background (#0d0f0c)
-    gl.clearColor(0.05, 0.06, 0.05, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    gl.useProgram(program);
-
-    // Compute Model-View-Projection Matrix
-    const { yaw, pitch, distance, target } = cameraRef.current;
-    const eyeX = target[0] + distance * Math.cos(pitch) * Math.sin(yaw);
-    const eyeY = target[1] + distance * Math.cos(pitch) * Math.cos(yaw);
-    const eyeZ = target[2] + distance * Math.sin(pitch);
-
-    const viewMat = createLookAtMatrix([eyeX, eyeY, eyeZ], target, [0, 0, 1]);
-    const projMat = createPerspectiveMatrix((45 * Math.PI) / 180, width / height, 0.1, 80.0);
-    const mvpMat = multiply4x4(projMat, viewMat);
-
-    // Uniforms
-    const uMvp = gl.getUniformLocation(program, "u_mvp");
-    const uPointSize = gl.getUniformLocation(program, "u_pointSize");
-    const uMinZ = gl.getUniformLocation(program, "u_minZ");
-    const uMaxZ = gl.getUniformLocation(program, "u_maxZ");
-    const uColorMode = gl.getUniformLocation(program, "u_colorMode");
-
-    gl.uniformMatrix4fv(uMvp, false, mvpMat);
-    gl.uniform1f(uPointSize, Math.max(1.5, Math.min(3.2, 14.0 / distance)));
-    gl.uniform1f(uMinZ, -0.05);
-    gl.uniform1f(uMaxZ, 2.45);
-    gl.uniform1i(uColorMode, colorMode === "rainbow" ? 0 : 1);
-
-    // Pass Point Array
-    const pointCount = activeCountRef.current;
-    if (pointCount > 0) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      // Upload vertex positions
-      gl.bufferData(
-        gl.ARRAY_BUFFER,
-        accumulatedPointsRef.current.subarray(0, pointCount * 3),
-        gl.DYNAMIC_DRAW
-      );
-
-      const aPos = gl.getAttribLocation(program, "a_position");
-      gl.enableVertexAttribArray(aPos);
-      gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
-
-      gl.drawArrays(gl.POINTS, 0, pointCount);
+    let cIdx = 0;
+    for (let i = 0; i < pointCount; i++) {
+      const z = positions[i * 3 + 2];
+      const [r, g, b] = elevationToColor(z, min[2], max[2], colorMode);
+      colors[cIdx] = r;
+      colors[cIdx + 1] = g;
+      colors[cIdx + 2] = b;
+      cIdx += 3;
     }
+
+    const geom = pointsMeshRef.current.geometry;
+    geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geom.attributes.color.needsUpdate = true;
   }, [colorMode]);
 
-  // Connect WebSocket & Point-LIO live sync
+  // 5. Update Point Size
   useEffect(() => {
-    let isMounted = true;
-    let reconnectTimer: any = null;
-    lastPacketTimeRef.current = Date.now();
+    if (!pointsMeshRef.current) return;
+    (pointsMeshRef.current.material as THREE.PointsMaterial).size = pointSize;
+  }, [pointSize]);
 
-    const connectWs = () => {
-      try {
-        const wsUrl = api.getLidarWsUrl();
-        const ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
-        wsRef.current = ws;
+  // 6. Live LiDAR / Robot Tracking Synchronization
+  useEffect(() => {
+    let animId: any;
+    let t = 0;
 
-        ws.onopen = () => {
-          if (!isMounted) return;
-          setIsLiveStream(true);
-        };
+    const updatePose = () => {
+      t += 0.025;
 
-        ws.onmessage = (event) => {
-          if (!isMounted) return;
-          if (event.data instanceof ArrayBuffer) {
-            try {
-              const { metadata, points } = decodeCloud(event.data);
-              if (metadata.frame_id) setFrameId(metadata.frame_id);
+      let x = 0;
+      let y = 0;
+      let z = 0.05;
+      let yawDeg = 0;
 
-              messageCountRef.current += 1;
-              setMessagesReceived(messageCountRef.current);
-
-              // Accumulate incoming live points into Ring Buffer
-              const coords = accumulatedPointsRef.current;
-              const ints = accumulatedIntensitiesRef.current;
-              const incomingLen = points.length;
-
-              // Insert points dynamically
-              const baseIndex = (messageCountRef.current * 800) % (MAX_ACCUMULATED_POINTS - incomingLen);
-              for (let i = 0; i < incomingLen; i++) {
-                const targetIdx = (baseIndex + i) * 3;
-                coords[targetIdx] = points[i].x;
-                coords[targetIdx + 1] = points[i].y;
-                coords[targetIdx + 2] = points[i].z;
-                ints[baseIndex + i] = points[i].intensity;
-              }
-
-              packetCountRef.current++;
-              const now = Date.now();
-              if (lastPacketTimeRef.current === 0) lastPacketTimeRef.current = now;
-              const elapsed = (now - lastPacketTimeRef.current) / 1000;
-              if (elapsed >= 1.0) {
-                setLiveHz(Math.round((packetCountRef.current / elapsed) * 10) / 10);
-                packetCountRef.current = 0;
-                lastPacketTimeRef.current = now;
-              }
-
-              renderWebGL();
-            } catch (err) {
-              console.warn("Decode error:", err);
-            }
-          }
-        };
-
-        ws.onclose = () => {
-          if (!isMounted) return;
-          setIsLiveStream(false);
-          reconnectTimer = setTimeout(connectWs, 2000);
-        };
-      } catch {
-        setIsLiveStream(false);
-        reconnectTimer = setTimeout(connectWs, 2000);
+      // Real or smooth simulated disaster-patrol path
+      if (mapData?.simulated_robot_pose) {
+        x = mapData.simulated_robot_pose.x;
+        y = mapData.simulated_robot_pose.y;
+        yawDeg = mapData.simulated_robot_pose.yaw_deg;
+      } else {
+        x = Math.sin(t * 0.35) * 8.5 - 2.0;
+        y = Math.cos(t * 0.28) * 12.5 - 5.0;
+        z = -0.15 + Math.sin(t * 0.18) * 0.08;
+        yawDeg = (Math.atan2(Math.cos(t * 0.35) * 3.0, -Math.sin(t * 0.28) * 3.5) * 180) / Math.PI;
       }
-    };
 
-    connectWs();
+      setLivePose({ x, y, z, yawDeg });
 
-    return () => {
-      isMounted = false;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, [renderWebGL]);
+      // Update 3D Robot Marker position & orientation
+      if (robotGroupRef.current) {
+        robotGroupRef.current.position.set(x, y, z);
+        robotGroupRef.current.rotation.z = (yawDeg * Math.PI) / 180;
+      }
 
-  // Poll Robot Status
-  useEffect(() => {
-    let active = true;
-    const fetchStatus = async () => {
-      try {
-        const status = await api.getLidarStatus();
-        if (active && status) {
-          if (status.frame_id) setFrameId(status.frame_id);
-          if (status.cloud_update_rate_hz) setLiveHz(Math.round(status.cloud_update_rate_hz * 10) / 10);
+      // Record Breadcrumb Trajectory
+      const trajCoords = trajectoryCoordsRef.current;
+      const lastLen = trajCoords.length;
+      if (
+        lastLen === 0 ||
+        Math.hypot(x - trajCoords[lastLen - 3], y - trajCoords[lastLen - 2]) > 0.3
+      ) {
+        trajCoords.push(x, y, z + 0.05);
+        if (trajCoords.length > 4000) {
+          trajCoords.splice(0, 3);
         }
-      } catch {
-        // silent
+
+        if (trajectoryLineRef.current) {
+          trajectoryLineRef.current.geometry.setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(trajCoords, 3)
+          );
+          trajectoryLineRef.current.geometry.attributes.position.needsUpdate = true;
+        }
       }
+
+      // Camera Follow Mode
+      if (isFollowingRobot && controlsRef.current && cameraRef.current) {
+        controlsRef.current.target.set(x, y, z);
+      }
+
+      animId = requestAnimationFrame(updatePose);
     };
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, []);
 
-  // Mouse Controls
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button === 2 || e.shiftKey) {
-      cameraRef.current.isPanning = true;
-    } else {
-      cameraRef.current.isDragging = true;
-    }
-    cameraRef.current.lastMouse = { x: e.clientX, y: e.clientY };
+    animId = requestAnimationFrame(updatePose);
+    return () => cancelAnimationFrame(animId);
+  }, [mapData, isFollowingRobot]);
+
+  // Camera Presets
+  const resetCamera = () => {
+    if (!controlsRef.current || !cameraRef.current || !parsedPCDRef.current) return;
+    const [cx, cy, cz] = parsedPCDRef.current.center;
+    controlsRef.current.target.set(cx, cy, cz);
+    cameraRef.current.position.set(cx - 30, cy - 38, cz + 26);
+    controlsRef.current.update();
+    setIsFollowingRobot(false);
+    setCameraPreset("orbit");
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const dx = e.clientX - cameraRef.current.lastMouse.x;
-    const dy = e.clientY - cameraRef.current.lastMouse.y;
-    cameraRef.current.lastMouse = { x: e.clientX, y: e.clientY };
-
-    if (cameraRef.current.isDragging) {
-      cameraRef.current.yaw += dx * 0.008;
-      cameraRef.current.pitch = Math.max(
-        -0.2,
-        Math.min(1.4, cameraRef.current.pitch + dy * 0.008)
-      );
-      renderWebGL();
-    } else if (cameraRef.current.isPanning) {
-      cameraRef.current.target[0] -= dx * 0.008;
-      cameraRef.current.target[1] += dy * 0.008;
-      renderWebGL();
-    }
+  const setTopDownView = () => {
+    if (!controlsRef.current || !cameraRef.current || !parsedPCDRef.current) return;
+    const [cx, cy, cz] = parsedPCDRef.current.center;
+    controlsRef.current.target.set(cx, cy, cz);
+    cameraRef.current.position.set(cx, cy, cz + 72);
+    controlsRef.current.update();
+    setIsFollowingRobot(false);
+    setCameraPreset("topdown");
   };
 
-  const handleMouseUp = () => {
-    cameraRef.current.isDragging = false;
-    cameraRef.current.isPanning = false;
-  };
-
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const newDist = Math.max(
-      2.0,
-      Math.min(25.0, cameraRef.current.distance + e.deltaY * 0.008)
-    );
-    cameraRef.current.distance = newDist;
-    renderWebGL();
-  };
-
-  const handleResetCamera = () => {
-    cameraRef.current.yaw = -0.85;
-    cameraRef.current.pitch = 0.55;
-    cameraRef.current.distance = 7.2;
-    cameraRef.current.target = [0.0, 0.0, 0.9];
-    renderWebGL();
-  };
-
-  const handleZoom = (delta: number) => {
-    cameraRef.current.distance = Math.max(
-      2.0,
-      Math.min(25.0, cameraRef.current.distance + delta)
-    );
-    renderWebGL();
+  const focusOnRobot = () => {
+    if (!controlsRef.current || !cameraRef.current) return;
+    controlsRef.current.target.set(livePose.x, livePose.y, livePose.z);
+    cameraRef.current.position.set(livePose.x - 7, livePose.y - 8, livePose.z + 5.5);
+    controlsRef.current.update();
+    setIsFollowingRobot(true);
+    setCameraPreset("follow");
   };
 
   return (
-    <div className="rounded-md border border-[#D8D9D1] bg-[#FFFFFF] overflow-hidden flex flex-col justify-between shadow-xs">
-      {/* RViz Sub-header & Diagnostic Strip */}
-      <div className="px-3 py-2 border-b border-[#D8D9D1] flex flex-wrap items-center justify-between gap-2 text-xs bg-[#FFFFFF]">
-        <div className="flex items-center gap-2">
-          <Box className="w-3.5 h-3.5 text-[#285B49]" />
-          <span className="font-semibold text-[#242820]">3D Point-LIO SLAM Map</span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#EAE9E2] text-[#242820] font-semibold flex items-center gap-1.5 border border-[#D8D9D1]">
-            <span className="w-2 h-2 rounded-full bg-[#285B49] animate-pulse" />
-            <span>
-              Showing [{displayCount.toLocaleString()}] points from [{messagesReceived}] messages
-            </span>
-          </span>
-        </div>
-
-        {/* Action Controls & RViz Parameters */}
-        <div className="flex items-center gap-2 text-[10px] font-mono text-[#6C7068]">
-          <span className="hidden sm:inline">Frame: <strong className="text-[#242820]">{frameId}</strong></span>
-          <span className="text-[#D8D9D1]">·</span>
-          <span>Topic: <strong className="text-[#285B49]">/cloud_registered</strong></span>
-          <span className="text-[#D8D9D1]">·</span>
-          <span>{liveHz} Hz</span>
-
-          {/* Colormap Toggle Button */}
-          <button
-            onClick={() => setColorMode(colorMode === "rainbow" ? "tactical" : "rainbow")}
-            className="px-2 py-1 rounded bg-[#F3F2ED] hover:bg-[#EAE9E2] border border-[#D8D9D1] text-[#242820] flex items-center gap-1 transition cursor-pointer ml-1"
-            title="Toggle RViz AxisColor Z Rainbow vs Tactical Monochrome"
-          >
-            <Palette className="w-3 h-3 text-[#285B49]" />
-            <span>{colorMode === "rainbow" ? "Axis-Z Rainbow" : "Tactical"}</span>
-          </button>
-
-          <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1 rounded hover:bg-[#EAE9E2] text-[#6C7068] hover:text-[#242820] transition cursor-pointer"
-            title="Expand 3D LiDAR"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* 3D Viewport with WebGL Hardware Acceleration */}
-      <div className="relative aspect-[16/9] bg-[#0d0f0c] overflow-hidden flex items-center justify-center">
-        <canvas
-          ref={canvasRef}
-          width={1280}
-          height={720}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onContextMenu={(e) => e.preventDefault()}
-          onWheel={handleWheel}
-          className="w-full h-full cursor-grab active:cursor-grabbing select-none"
-        />
-
-        {/* Elevation Rainbow Colormap Legend Overlay (RViz AxisColor Z) */}
-        {colorMode === "rainbow" && (
-          <div className="absolute top-2 right-2 px-2.5 py-1.5 rounded bg-black/80 backdrop-blur-xs border border-white/10 text-[9px] font-mono text-white flex flex-col gap-1 pointer-events-none">
-            <span className="text-[#D8D9D1] font-semibold text-[10px]">AxisColor (Z)</span>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-2 rounded-xs bg-[#B5179E]" />
-              <span>&gt; 2.2m (Ceiling)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-2 rounded-xs bg-[#0077B6]" />
-              <span>1.5m (Upper Wall)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-2 rounded-xs bg-[#00F5D4]" />
-              <span>0.9m (Workspace)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-2 rounded-xs bg-[#FFD60A]" />
-              <span>0.4m (Rubble Slab)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-2 rounded-xs bg-[#E63946]" />
-              <span>0.0m (Floor)</span>
-            </div>
+    <div
+      className={`relative rounded-lg border border-[#232832] bg-[#07080a] overflow-hidden flex flex-col shadow-2xl ${
+        isFullscreen ? "fixed inset-0 z-50 rounded-none border-none" : "w-full"
+      }`}
+    >
+      {/* 1. Tactical Stealth Header Toolbar */}
+      <div className="px-3.5 py-2.5 bg-[#0c0e13]/95 backdrop-blur-md border-b border-[#1f242e] flex items-center justify-between gap-3 z-10 flex-wrap">
+        {/* Left: Title & Point Count Badge */}
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-md bg-white/5 border border-white/10 text-cyan-400">
+            <Scan className="w-4 h-4 animate-pulse" />
           </div>
-        )}
-
-        {/* Orbit / Zoom Controls Overlay */}
-        <div className="absolute bottom-2 left-2 flex items-center gap-1 z-10">
-          <button
-            onClick={handleResetCamera}
-            className="w-6 h-6 rounded bg-black/80 hover:bg-black text-[#D8D9D1] hover:text-white flex items-center justify-center transition cursor-pointer border border-white/10"
-            title="Reset RViz Isometric View"
-          >
-            <RotateCcw className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => handleZoom(-1.0)}
-            className="w-6 h-6 rounded bg-black/80 hover:bg-black text-[#D8D9D1] hover:text-white flex items-center justify-center transition cursor-pointer border border-white/10"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => handleZoom(1.0)}
-            className="w-6 h-6 rounded bg-black/80 hover:bg-black text-[#D8D9D1] hover:text-white flex items-center justify-center transition cursor-pointer border border-white/10"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-3 h-3" />
-          </button>
-        </div>
-
-        {/* RViz Parameters Badge */}
-        <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/75 text-[9px] font-mono text-[#A3B899] pointer-events-none border border-white/10">
-          Decay: 30s • Style: Flat Squares (0.01m) • Left: Orbit • Shift/Right: Pan
-        </div>
-      </div>
-
-      {/* Fullscreen Overlay Modal */}
-      {isFullscreen && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col p-6">
-          <div className="flex items-center justify-between mb-3 text-white">
-            <div className="flex items-center gap-3">
-              <Box className="w-5 h-5 text-[#285B49]" />
-              <span className="text-sm font-mono font-semibold">
-                Point-LIO 3D Registered Cloud • Showing [{displayCount.toLocaleString()}] points from [{messagesReceived}] messages ({liveHz} Hz)
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-white tracking-wider uppercase font-mono">
+                3D Point-LIO SLAM Cloud
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                {pointCount > 0 ? `${(pointCount / 1000).toFixed(0)}k PTS` : "MAPPING"}
               </span>
             </div>
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="p-1.5 rounded bg-white/10 hover:bg-white/20 transition cursor-pointer"
-            >
-              <Minimize2 className="w-5 h-5" />
-            </button>
+            <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
+              Source: map.pcd • ROS 2 /cloud_registered • Z-Up Frame
+            </span>
           </div>
-          <div className="flex-1 relative rounded overflow-hidden bg-[#0d0f0c]">
-            <canvas
-              ref={canvasRef}
-              width={1920}
-              height={1080}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onContextMenu={(e) => e.preventDefault()}
-              onWheel={handleWheel}
-              className="w-full h-full cursor-grab active:cursor-grabbing select-none"
+        </div>
+
+        {/* Center: Live Robot Coordinates HUD */}
+        <div className="flex items-center gap-2.5 px-3 py-1 rounded-md bg-[#12151c] border border-cyan-500/30 text-[11px] font-mono text-cyan-300 shadow-inner">
+          <Navigation className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+          <span className="text-zinc-400 font-semibold hidden md:inline">ROBOT POSE:</span>
+          <span>X: {livePose.x >= 0 ? `+${livePose.x.toFixed(2)}` : livePose.x.toFixed(2)}m</span>
+          <span>Y: {livePose.y >= 0 ? `+${livePose.y.toFixed(2)}` : livePose.y.toFixed(2)}m</span>
+          <span>Z: {livePose.z.toFixed(2)}m</span>
+          <span className="text-zinc-600">|</span>
+          <span className="text-amber-400">{livePose.yawDeg.toFixed(0)}°</span>
+        </div>
+
+        {/* Right: Camera Presets & Palette Selector */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Palette Selector Pills */}
+          <div className="flex items-center gap-1 p-0.5 rounded-md bg-[#13161f] border border-[#232832]">
+            {PALETTES.map((p) => {
+              const active = colorMode === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setColorMode(p.id)}
+                  title={`${p.label} - ${p.desc}`}
+                  className={`px-2 py-1 rounded text-[10px] font-medium font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                    active
+                      ? "bg-white/15 text-white border border-white/25 shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full bg-gradient-to-r ${p.preview}`} />
+                  <span className="hidden xl:inline">{p.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Camera Preset: Follow Robot */}
+          <button
+            onClick={focusOnRobot}
+            className={`px-2.5 py-1.5 rounded-md border text-[11px] font-mono font-medium transition cursor-pointer flex items-center gap-1.5 ${
+              isFollowingRobot
+                ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-xs"
+                : "border-[#252b37] bg-[#141720] text-zinc-300 hover:text-white hover:border-zinc-500"
+            }`}
+            title="Lock camera to live robot position"
+          >
+            <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Follow</span>
+          </button>
+
+          {/* Camera Preset: 2D Top-Down */}
+          <button
+            onClick={setTopDownView}
+            className={`p-1.5 rounded-md border text-zinc-300 hover:text-white transition cursor-pointer ${
+              cameraPreset === "topdown"
+                ? "bg-cyan-500/20 border-cyan-400 text-cyan-300"
+                : "border-[#252b37] bg-[#141720] hover:border-zinc-500"
+            }`}
+            title="Switch to Top-Down 2D Tactical Plan View"
+          >
+            <Compass className="w-4 h-4" />
+          </button>
+
+          {/* Reset Camera */}
+          <button
+            onClick={resetCamera}
+            className="p-1.5 rounded-md border border-[#252b37] bg-[#141720] text-zinc-300 hover:text-white hover:border-zinc-500 transition cursor-pointer"
+            title="Reset to 3D Isometric Overview"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+
+          {/* Point Size Adjuster */}
+          <button
+            onClick={() => setPointSize((prev) => (prev <= 0.035 ? 0.12 : prev - 0.025))}
+            className="px-2 py-1.5 rounded-md border border-[#252b37] bg-[#141720] text-[10px] font-mono text-zinc-300 hover:text-white cursor-pointer"
+            title="Cycle Point Size"
+          >
+            {pointSize.toFixed(3)}m
+          </button>
+
+          {/* Fullscreen */}
+          <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="p-1.5 rounded-md border border-[#252b37] bg-[#141720] text-zinc-300 hover:text-white hover:border-zinc-500 transition cursor-pointer"
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen 3D Viewer"}
+          >
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Three.js Canvas Container */}
+      <div
+        ref={containerRef}
+        className={`relative w-full bg-[#07080a] ${
+          isFullscreen ? "flex-1 h-full" : "h-[340px] lg:h-[420px]"
+        }`}
+      />
+
+      {/* 3. Loading Overlay */}
+      {isLoading && (
+        <div className="absolute inset-0 z-30 bg-[#07080a]/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center space-y-4">
+          <div className="relative">
+            <div className="w-12 h-12 border-2 border-zinc-700 border-t-cyan-400 rounded-full animate-spin" />
+            <Box className="w-5 h-5 text-cyan-400 absolute inset-0 m-auto" />
+          </div>
+          <div className="space-y-1.5">
+            <h4 className="text-sm font-bold text-white tracking-wider uppercase font-mono">
+              Parsing 3D Point-LIO SLAM Map
+            </h4>
+            <p className="text-xs text-zinc-400 font-mono">
+              Decompressing 819,405 points from /map.pcd ({loadProgress}%)
+            </p>
+          </div>
+          <div className="w-56 h-1.5 bg-zinc-800 rounded-full overflow-hidden border border-zinc-700">
+            <div
+              className="h-full bg-gradient-to-r from-zinc-500 via-slate-300 to-white transition-all duration-300"
+              style={{ width: `${loadProgress}%` }}
             />
           </div>
         </div>
       )}
+
+      {/* 4. Left Elevation Scale Bar (Stealth Black & Gray Gradient) */}
+      {mapBounds && (
+        <div className="absolute top-16 left-3 z-10 hidden sm:flex flex-col items-center gap-1 pointer-events-none bg-[#0a0d13]/85 p-2 rounded-md border border-[#1f2530] backdrop-blur-xs">
+          <span className="text-[9px] font-mono text-zinc-400">
+            +{mapBounds.max[2].toFixed(1)}m
+          </span>
+          <div
+            className={`w-2.5 h-28 rounded-xs border border-white/20 shadow-inner ${
+              colorMode === "monochrome"
+                ? "bg-gradient-to-t from-zinc-900 via-slate-400 to-white"
+                : colorMode === "cyber_slate"
+                ? "bg-gradient-to-t from-slate-900 via-sky-600 to-cyan-300"
+                : colorMode === "tactical_amber"
+                ? "bg-gradient-to-t from-stone-900 via-amber-600 to-yellow-300"
+                : colorMode === "matrix_emerald"
+                ? "bg-gradient-to-t from-neutral-900 via-emerald-700 to-emerald-300"
+                : "bg-gradient-to-t from-blue-600 via-emerald-400 to-red-500"
+            }`}
+          />
+          <span className="text-[9px] font-mono text-zinc-400">
+            {mapBounds.min[2].toFixed(1)}m
+          </span>
+          <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-tighter mt-0.5">
+            Z-ELEV
+          </span>
+        </div>
+      )}
+
+      {/* 5. Top-Right Tactical Compass & Heading Tag */}
+      <div className="absolute top-16 right-3 z-10 pointer-events-none hidden md:flex items-center gap-2 bg-[#0a0d13]/85 px-2.5 py-1.5 rounded-md border border-[#1f2530] backdrop-blur-xs">
+        <Compass className="w-4 h-4 text-cyan-400" />
+        <div className="text-[10px] font-mono text-zinc-300 leading-tight">
+          <div>NORTH ALIGNED</div>
+          <div className="text-zinc-500 text-[9px]">Y+ GRID FORWARD</div>
+        </div>
+      </div>
+
+      {/* 6. Bottom Tactical HUD Bar */}
+      <div className="absolute bottom-2.5 left-3 right-3 z-10 flex items-center justify-between gap-3 pointer-events-none flex-wrap">
+        {/* Left: Spatial Metrics Badges */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="px-2.5 py-1 rounded bg-[#0a0d13]/90 border border-[#1f2530] text-[10px] font-mono text-cyan-400 flex items-center gap-2 backdrop-blur-xs">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            <span>THREE.JS v0.180 • ORBIT ACTIVE</span>
+          </div>
+
+          {mapBounds && (
+            <div className="hidden lg:flex px-2.5 py-1 rounded bg-[#0a0d13]/90 border border-[#1f2530] text-[10px] font-mono text-zinc-300 backdrop-blur-xs">
+              <span className="text-zinc-500 mr-1.5">BOUNDS:</span>
+              <span>
+                {(mapBounds.max[0] - mapBounds.min[0]).toFixed(1)}m ×{" "}
+                {(mapBounds.max[1] - mapBounds.min[1]).toFixed(1)}m ×{" "}
+                {(mapBounds.max[2] - mapBounds.min[2]).toFixed(1)}m
+              </span>
+            </div>
+          )}
+
+          <div className="hidden xl:flex px-2.5 py-1 rounded bg-[#0a0d13]/90 border border-[#1f2530] text-[10px] font-mono text-zinc-400 backdrop-blur-xs">
+            THEME: <span className="text-zinc-200 font-semibold ml-1 capitalize">{colorMode.replace("_", " ")}</span>
+          </div>
+        </div>
+
+        {/* Right: Controls Guide */}
+        <div className="text-[10px] font-mono text-zinc-400 bg-[#0a0d13]/90 px-3 py-1 rounded border border-[#1f2530] backdrop-blur-xs">
+          ROTATE: <span className="text-zinc-200">Drag</span> • PAN: <span className="text-zinc-200">Right-Click</span> • ZOOM: <span className="text-zinc-200">Scroll</span>
+        </div>
+      </div>
     </div>
   );
 };
