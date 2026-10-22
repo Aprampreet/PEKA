@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "PIPER SOS Companion",
+    "slug": "piper-sos-companion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#070B14"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This emergency app requires high-accuracy GPS coordinates to transmit your rescue location to the operations team during an SOS."
+      }
+    },
+    "android": {
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    }
+  }
+}
