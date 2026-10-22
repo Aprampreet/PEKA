@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+  --bg-app: #F3F2ED;
+  --surface-main: #FFFFFF;
+  --surface-secondary: #EAE9E2;
+  --text-main: #242820;
+  --text-muted: #6C7068;
+  --border-subtle: #D8D9D1;
+  --accent-forest: #285B49;
+  --accent-olive: #7D8964;
+  --warning-amber: #B77927;
+  --critical-brick: #B4493F;
+}
+
+html,
+body {
+  background-color: #F3F2ED !important;
+  color: #242820 !important;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Restrained Industrial Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #EAE9E2;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D8D9D1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B6B8AE;
+}
