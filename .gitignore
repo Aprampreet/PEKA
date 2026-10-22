@@ -1,0 +1,33 @@
+# Dependencies
+**/node_modules/
+.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js build
+frontend/.next/
+frontend/out/
+
+# Expo / React Native
+**/.expo/
+**/web-build/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.venv/
+**/env/
+**/venv/
+
+# Environment variables
+.env*.local
+frontend/.env.local
+backend/.env
+
+# Temporary / OS
+.DS_Store
+Thumbs.db
+*.log
