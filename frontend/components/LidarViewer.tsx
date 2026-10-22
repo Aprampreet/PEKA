@@ -27,7 +27,7 @@ interface LidarViewerProps {
   pcdUrl?: string;
 }
 
-const PCD_CAPTURE_SECONDS = 10;
+const PCD_CAPTURE_SECONDS = 30;
 
 export const LidarViewer: React.FC<LidarViewerProps> = ({
   selectedCandidateCoords,
@@ -606,7 +606,9 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
             <span>
               {autoSyncEnabled
                 ? isCapturingPcd
-                  ? `Syncing (${captureSecondsLeft}s)`
+                  ? captureSecondsLeft > 1
+                    ? `Syncing (${captureSecondsLeft}s)`
+                    : "Compiling Cloud..."
                   : "Live Sync"
                 : "Sync Paused"}
             </span>

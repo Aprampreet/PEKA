@@ -499,7 +499,7 @@ class RobotApiClient:
         try:
             resp = await client.get(
                 f"{upstream_url}/api/lidar/capture.pcd",
-                timeout=httpx.Timeout(30.0, connect=2.0)
+                timeout=httpx.Timeout(60.0, connect=2.0)
             )
             if resp.status_code == 200:
                 frame_id = resp.headers.get("X-PointCloud-Frame-Id", "camera_init")
