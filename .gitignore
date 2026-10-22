@@ -1,0 +1,8 @@
+.playwright-mcp/
+.venv/
+node_modules/
+.next/
+*.env
+*.env.local
+__pycache__/
+*.pyc

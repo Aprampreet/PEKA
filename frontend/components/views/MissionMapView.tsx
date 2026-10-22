@@ -3,6 +3,7 @@
 import React from "react";
 import { MissionMap } from "../MissionMap";
 import { LidarViewer } from "../LidarViewer";
+import { TeslaMap3D } from "../TeslaMap3D";
 import { MapData, ObservationRecord } from "../../lib/types";
 
 interface MissionMapViewProps {
@@ -20,58 +21,70 @@ export const MissionMapView: React.FC<MissionMapViewProps> = ({
   selectedObservationId,
   onSelectObservation,
 }) => {
-  const [viewMode, setViewMode] = React.useState<"2d" | "3d">("2d");
+  const [viewMode, setViewMode] = React.useState<"tesla" | "2d" | "3d">("tesla");
 
   return (
     <div className="space-y-5">
       {/* Map Header */}
-      <div className="p-4 rounded-md bg-white border border-[#D8D9D1] flex flex-wrap items-center justify-between gap-4 shadow-xs">
+      <div className="p-3.5 rounded-md bg-white border border-[#D8D9D1] flex flex-wrap items-center justify-between gap-3 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#285B49]" />
-            <h2 className="text-base font-semibold text-[#242820]">
-              Spatial Disaster Map &amp; 3D Odometry
+            <span className="w-2 h-2 rounded-full bg-[#0ea5e9]" />
+            <h2 className="text-sm font-semibold text-[#242820]">
+              Mission Map
             </h2>
           </div>
           <p className="text-xs text-[#6C7068] mt-0.5">
-            2D metric occupancy grid and real-time 3D Point-LIO registered spatial point cloud
+            Spatial environment &amp; occupancy grid
           </p>
         </div>
 
-        {/* View Mode Toggle & Metrics */}
-        <div className="flex items-center gap-3 text-xs font-mono">
-          <div className="flex items-center p-0.5 rounded bg-[#F3F2ED] border border-[#D8D9D1]">
-            <button
-              onClick={() => setViewMode("2d")}
-              className={`px-3 py-1 rounded text-xs transition cursor-pointer font-sans ${
-                viewMode === "2d"
-                  ? "bg-[#285B49] text-white font-medium shadow-xs"
-                  : "text-[#6C7068] hover:text-[#242820]"
-              }`}
-            >
-              2D Occupancy Grid
-            </button>
-            <button
-              onClick={() => setViewMode("3d")}
-              className={`px-3 py-1 rounded text-xs transition cursor-pointer font-sans ${
-                viewMode === "3d"
-                  ? "bg-[#285B49] text-white font-medium shadow-xs"
-                  : "text-[#6C7068] hover:text-[#242820]"
-              }`}
-            >
-              3D Point-LIO Cloud
-            </button>
-          </div>
-
-          <div className="hidden sm:block px-3 py-1.5 rounded bg-[#F3F2ED] border border-[#D8D9D1] text-[#242820]">
-            Frame: <span className="font-semibold text-[#242820]">{viewMode === "3d" ? "camera_init" : "ROS 2 /map"}</span>
-          </div>
+        {/* View Mode Toggle */}
+        <div className="flex items-center p-0.5 rounded bg-[#F3F2ED] border border-[#D8D9D1] text-xs">
+          <button
+            onClick={() => setViewMode("tesla")}
+            className={`px-3 py-1 rounded text-xs transition cursor-pointer font-sans ${
+              viewMode === "tesla"
+                ? "bg-[#090d16] text-white font-medium shadow-xs"
+                : "text-[#6C7068] hover:text-[#242820]"
+            }`}
+          >
+            3D Map
+          </button>
+          <button
+            onClick={() => setViewMode("2d")}
+            className={`px-3 py-1 rounded text-xs transition cursor-pointer font-sans ${
+              viewMode === "2d"
+                ? "bg-[#285B49] text-white font-medium shadow-xs"
+                : "text-[#6C7068] hover:text-[#242820]"
+            }`}
+          >
+            2D Grid
+          </button>
+          <button
+            onClick={() => setViewMode("3d")}
+            className={`px-3 py-1 rounded text-xs transition cursor-pointer font-sans ${
+              viewMode === "3d"
+                ? "bg-[#285B49] text-white font-medium shadow-xs"
+                : "text-[#6C7068] hover:text-[#242820]"
+            }`}
+          >
+            Point Cloud
+          </button>
         </div>
       </div>
 
-      {/* Main Map Component with 2D/3D Mode */}
+      {/* Main Map Component with Tesla 3D / 2D / 3D Cloud Mode */}
       <div className="grid grid-cols-1 gap-6">
-        {viewMode === "2d" ? (
+        {viewMode === "tesla" ? (
+          <TeslaMap3D
+            mapData={mapData}
+            isLoading={isLoading}
+            observations={observations}
+            selectedObservationId={selectedObservationId}
+            onSelectObservation={onSelectObservation}
+          />
+        ) : viewMode === "2d" ? (
           <MissionMap
             mapData={mapData}
             isLoading={isLoading}

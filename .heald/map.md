@@ -1,0 +1,125 @@
+---
+type: map
+---
+
+# Repository Map
+
+- AGENTS.md
+- backend/ (490 files, 7350822 bytes)
+  - .env.example
+  - app/ (12 files, 104373 bytes)
+    - __init__.py
+    - client.py
+    - config.py
+    - db.py
+    - event_log.py
+    - main.py — ENTRY POINT
+    - map_adapter.py
+    - observations.py
+    - perception.py
+    - recognition_adapter.py
+    - report_generator.py
+    - schemas.py
+  - data/ (473 files, 7237481 bytes)
+    - debug_frame.jpg
+    - evidence/ (470 files, 7075693 bytes)
+      - elena_rostova.jpg
+      - ev_00a37833-a9a4-49f8-ac26-a5a713e67b2c_crop.jpg
+      - ev_00a37833-a9a4-49f8-ac26-a5a713e67b2c_full.jpg
+      - ev_01afe8d5-8361-457d-acb2-0330ba1583f7_crop.jpg
+      - ev_01afe8d5-8361-457d-acb2-0330ba1583f7_full.jpg
+      - ev_0311c4ed-aa12-4e61-a856-f006d891294b_crop.jpg
+      - ev_0311c4ed-aa12-4e61-a856-f006d891294b_full.jpg
+      - ev_045cc52d-d36b-4e24-95a8-64700200153b_crop.jpg
+      - ev_045cc52d-d36b-4e24-95a8-64700200153b_full.jpg
+      - ev_05fe8667-81cd-4a17-9303-099b1037d9c5_crop.jpg
+      - ev_05fe8667-81cd-4a17-9303-099b1037d9c5_full.jpg
+      - ev_06a4fd6a-4427-46f6-bc75-77435c263411_crop.jpg
+      - ev_06a4fd6a-4427-46f6-bc75-77435c263411_full.jpg
+      - ev_08dfdcc2-0264-4570-8656-2e4f1c64b913_crop.jpg
+      - ev_08dfdcc2-0264-4570-8656-2e4f1c64b913_full.jpg
+      - ev_0951e1b1-b245-49ea-8566-5e4a96ecb533_crop.jpg
+      - ev_0951e1b1-b245-49ea-8566-5e4a96ecb533_full.jpg
+      - ev_09d933f9-6e95-4597-9008-14b411557475_crop.jpg
+      - ev_09d933f9-6e95-4597-9008-14b411557475_full.jpg
+      - ev_0a3676ae-4964-4cc3-b073-b1d9389bc83b_crop.jpg
+      - ev_0a3676ae-4964-4cc3-b073-b1d9389bc83b_full.jpg
+      - ev_0eab878d-990c-4b5d-8106-d12513a178cc_crop.jpg
+      - ev_0eab878d-990c-4b5d-8106-d12513a178cc_full.jpg
+      - ev_0f79cb5c-a240-44c4-814a-e005b1fc7fc5_crop.jpg
+      - ev_0f79cb5c-a240-44c4-814a-e005b1fc7fc5_full.jpg
+      - ev_0fce47ab-f657-402c-8272-6fb07cbea37a_crop.jpg
+      - ev_0fce47ab-f657-402c-8272-6fb07cbea37a_full.jpg
+      - ev_105e4aa8-b4ff-4bc1-9ec9-13f2a3744ce1_crop.jpg
+      - ev_105e4aa8-b4ff-4bc1-9ec9-13f2a3744ce1_full.jpg
+      - ev_105f5446-539a-4178-8a4b-240d7f7d2ea5_crop.jpg
+      - ev_105f5446-539a-4178-8a4b-240d7f7d2ea5_full.jpg
+      - ev_1315fc7e-a1ee-4149-b289-b73e55f6bc45_crop.jpg
+      - ev_1315fc7e-a1ee-4149-b289-b73e55f6bc45_full.jpg
+      - ev_14c85359-bb8e-47a8-8a55-daa3ab504ccb_crop.jpg
+      - ev_14c85359-bb8e-47a8-8a55-daa3ab504ccb_full.jpg
+      - ev_15182d20-f234-41f9-9936-55f20966db34_crop.jpg
+      - ev_15182d20-f234-41f9-9936-55f20966db34_full.jpg
+      - ev_1822da2e-9bb7-4b3e-87f4-91a48b492c66_crop.jpg
+      - ev_1822da2e-9bb7-4b3e-87f4-91a48b492c66_full.jpg
+      - ev_18610586-3956-4b18-ba23-109db219c199_crop.jpg
+      - ev_18610586-3956-4b18-ba23-109db219c199_full.jpg
+      - ev_1a12c86e-8f30-445d-8435-83a09ddc22ff_crop.jpg
+      - ev_1a12c86e-8f30-445d-8435-83a09ddc22ff_full.jpg
+      - ev_1b5efeac-ef07-49b5-920a-3a1ce2ea553b_crop.jpg
+      - ev_1b5efeac-ef07-49b5-920a-3a1ce2ea553b_full.jpg
+      - ev_1b6b06e0-6886-4a5c-8356-e1f9fc30c96c_crop.jpg
+      - ev_1b6b06e0-6886-4a5c-8356-e1f9fc30c96c_full.jpg
+      - ev_1c4c6828-60c9-4ef3-8e2a-8a68da2b098a_crop.jpg
+      - ev_1c4c6828-60c9-4ef3-8e2a-8a68da2b098a_full.jpg
+      - ev_1cbe1404-32a0-4843-b2cd-eda51f01c074_crop.jpg
+      - ev_1cbe1404-32a0-4843-b2cd-eda51f01c074_full.jpg
+      - ev_1df7edc3-9a04-4244-a775-4bf8aa5f03ae_crop.jpg
+      - ev_1df7edc3-9a04-4244-a775-4bf8aa5f03ae_full.jpg
+      - ev_1e222d81-c193-40aa-be7a-e45a25fd8622_crop.jpg
+      - ev_1e222d81-c193-40aa-be7a-e45a25fd8622_full.jpg
+      - ev_1e3bdb70-ae24-492e-a1df-e4b6963107e2_crop.jpg
+      - ev_1e3bdb70-ae24-492e-a1df-e4b6963107e2_full.jpg
+      - ev_1ef13680-da88-41a0-a678-32d02070ba55_crop.jpg
+      - ev_1ef13680-da88-41a0-a678-32d02070ba55_full.jpg
+      - ev_1f06d296-1606-4efc-8cee-feb06924d856_crop.jpg
+      - ev_1f06d296-1606-4efc-8cee-feb06924d856_full.jpg
+      - ev_1f37dcea-3a00-47a2-8528-1921fe65df8b_crop.jpg
+      - ev_1f37dcea-3a00-47a2-8528-1921fe65df8b_full.jpg
+      - ev_21091ee4-33c4-4d9d-8501-e3af1368319e_crop.jpg
+      - ev_21091ee4-33c4-4d9d-8501-e3af1368319e_full.jpg
+      - ev_213e76ce-3ed8-4556-b3d1-9af262c062a4_crop.jpg
+      - ev_213e76ce-3ed8-4556-b3d1-9af262c062a4_full.jpg
+      - ev_22c9c819-154a-4f53-af7f-9959da4a96b2_crop.jpg
+      - ev_22c9c819-154a-4f53-af7f-9959da4a96b2_full.jpg
+      - ev_233319ad-8105-48a3-9c22-c6f36351e062_crop.jpg
+      - ev_233319ad-8105-48a3-9c22-c6f36351e062_full.jpg
+      - ev_233f0d4d-89b2-47e9-b571-230a494422fa_crop.jpg
+      - ev_233f0d4d-89b2-47e9-b571-230a494422fa_full.jpg
+      - ev_23fe0f65-0470-413b-ae31-a410c1ca131a_crop.jpg
+      - ev_23fe0f65-0470-413b-ae31-a410c1ca131a_full.jpg
+      - ev_2616ccce-9a89-4836-8f82-48a8e7730e9c_crop.jpg
+      - ev_2616ccce-9a89-4836-8f82-48a8e7730e9c_full.jpg
+      - ev_28508b94-1e18-4dae-9d6c-f6aca4754ac7_crop.jpg
+      - ev_28508b94-1e18-4dae-9d6c-f6aca4754ac7_full.jpg
+      - ev_28931a9d-d6a1-4c19-8854-4b5768eacfcf_crop.jpg
+      - ev_28931a9d-d6a1-4c19-8854-4b5768eacfcf_full.jpg
+      - ev_28bcefbd-87fd-4842-af46-e925eb7b18a9_crop.jpg
+      - ev_28bcefbd-87fd-4842-af46-e925eb7b18a9_full.jpg
+      - ev_28e379b8-8ffb-4ba4-b4c8-0eeda68a6111_crop.jpg
+      - ev_28e379b8-8ffb-4ba4-b4c8-0eeda68a6111_full.jpg
+      - ev_29904a9c-5ab0-41af-9605-b0bd0d8ea161_crop.jpg
+      - ev_29904a9c-5ab0-41af-9605-b0bd0d8ea161_full.jpg
+      - ev_2c10ff84-7969-4294-8e95-4d636014b76e_crop.jpg
+      - ev_2c10ff84-7969-4294-8e95-4d636014b76e_full.jpg
+      - ev_2dd0a368-f1be-47b0-9335-558f91ad4764_crop.jpg
+      - ev_2dd0a368-f1be-47b0-9335-558f91ad4764_full.jpg
+      - ev_2eb4136e-5cc1-425a-8a1d-3a1f28c14dab_crop.jpg
+      - ev_2eb4136e-5cc1-425a-8a1d-3a1f28c14dab_full.jpg
+      - ev_2fa58bd4-9a90-4580-8e25-415a9b064584_crop.jpg
+      - ev_2fa58bd4-9a90-4580-8e25-415a9b064584_full.jpg
+      - ev_30006135-d941-49b6-824d-acf162128a4a_crop.jpg
+      - ev_30006135-d941-49b6-824d-acf162128a4a_full.jpg
+      - ev_348a1012-480a-46f3-8962-a15ae82dc4d8_crop.jpg
+
+... tree truncated due to size limits ...

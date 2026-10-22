@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import numpy as np
 
 from app.db import EVIDENCE_DIR, get_db_connection
@@ -24,6 +27,26 @@ class PerceptionEngine:
     """
 
     def __init__(self):
+        self._registry_cache: List[Dict[str, Any]] = []
+        self._last_registry_refresh: float = 0.0
+        self._startup_grace_until: float = 0.0
+        self._last_observation_time: float = 0.0
+        self._observation_cooldown_sec: float = 4.0  # 4s cooldown between auto observations
+        self._consecutive_face_frames: int = 0
+        self._required_consecutive_frames: int = 1  # Trigger observation immediately on detection
+        self._latest_raw_frame: Optional[bytes] = None
+        self._latest_annotated_frame: Optional[bytes] = None
+        self._last_detected_count: int = 0
+        self._observation_callback = None
+
+        if cv2 is None:
+            self.face_cascade_alt2 = None
+            self.face_cascade_default = None
+            self.face_cascade = None
+            self.profile_cascade = None
+            self.eye_cascade = None
+            return
+
         cascade_dir = cv2.data.haarcascades
         # haarcascade_frontalface_alt2 has significantly lower false positive rate
         self.face_cascade_alt2 = cv2.CascadeClassifier(cascade_dir + "haarcascade_frontalface_alt2.xml")
@@ -32,9 +55,6 @@ class PerceptionEngine:
         self.profile_cascade = cv2.CascadeClassifier(cascade_dir + "haarcascade_profileface.xml")
         self.eye_cascade = cv2.CascadeClassifier(cascade_dir + "haarcascade_eye.xml")
 
-        # Registry Cache
-        self._registry_cache: List[Dict[str, Any]] = []
-        self._last_registry_refresh: float = 0.0
         self.reload_registry()
 
         # Observation debouncing & state
@@ -148,7 +168,7 @@ class PerceptionEngine:
         - Draws HUD tactical bounding boxes.
         - Triggers auto-observation only when face persists stably across frames.
         """
-        if not frame_bytes:
+        if not frame_bytes or cv2 is None:
             return frame_bytes
 
         self._latest_raw_frame = frame_bytes

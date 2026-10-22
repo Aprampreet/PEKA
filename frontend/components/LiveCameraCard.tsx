@@ -164,22 +164,28 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
         }
       };
 
-      ws.onclose = () => {
-        // Auto-reconnect after 1.5 seconds so feed never stays dead
+      let hasScheduledReconnect = false;
+      const scheduleReconnect = () => {
+        if (hasScheduledReconnect) return;
+        hasScheduledReconnect = true;
+        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = setTimeout(() => {
           connectWebSocket();
-        }, 1500);
+        }, 3000);
+      };
+
+      ws.onclose = () => {
+        scheduleReconnect();
       };
 
       ws.onerror = () => {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, 2000);
+        scheduleReconnect();
       };
     } catch {
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = setTimeout(() => {
         connectWebSocket();
-      }, 2000);
+      }, 3000);
     }
   }, []);
 
