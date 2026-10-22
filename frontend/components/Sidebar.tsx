@@ -39,7 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-56 shrink-0 bg-[#EAE9E2] border-r border-[#D8D9D1] flex flex-col justify-between p-3.5 min-h-screen sticky top-0 h-screen select-none">
+    <aside className="fixed top-0 left-0 bottom-0 z-40 w-56 h-screen bg-[#EAE9E2] border-r border-[#D8D9D1] flex flex-col justify-between p-3.5 select-none overflow-y-auto">
       <div className="space-y-5">
         {/* Restrained Brand Header */}
         <Link href="/" className="flex items-center gap-2.5 px-2 py-1.5 group">

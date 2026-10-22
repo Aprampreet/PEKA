@@ -14,6 +14,9 @@ import {
   SOSResponsePayload,
   LocationPreference,
   ReverseGeocodeResult,
+  SpeakerStatus,
+  BroadcastResult,
+  AIGeneratedReassurance,
 } from "./types";
 
 const BACKEND_URL =
@@ -428,6 +431,156 @@ class PiperApiClient {
       return await res.json();
     } catch {
       return null;
+    }
+  }
+
+  async getSpeakerStatus(): Promise<SpeakerStatus | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/speaker/status`, { cache: "no-store" });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async broadcastToSpeaker(
+    text: string,
+    language: "en" | "hi" = "en",
+    playLocal: boolean = false,
+    sendRover: boolean = true
+  ): Promise<BroadcastResult | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/speaker/broadcast`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language, play_local: playLocal, send_rover: sendRover }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async generateAIReassurance(
+    personName?: string | null,
+    distanceM?: number | null,
+    sector: string = "Sector 3",
+    language: "en" | "hi" = "en"
+  ): Promise<AIGeneratedReassurance | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/speaker/ai-generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_name: personName, distance_m: distanceM, sector, language }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async toggleAutoSpeaker(enabled: boolean): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/speaker/toggle-auto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return Boolean(data.auto_broadcast_enabled);
+    } catch {
+      return false;
+    }
+  }
+
+  async sendCmdVel(
+    linearX: number,
+    angularZ: number,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; topic: string; linear_x: number; angular_z: number; message: string } | null> {
+    const clampedLinearX = Math.max(-0.5, Math.min(0.5, Number(linearX.toFixed(3))));
+    const clampedAngularZ = Math.max(-1.0, Math.min(1.0, Number(angularZ.toFixed(3))));
+
+    try {
+      const res = await fetch(`${this.baseUrl}/api/robot/cmd_vel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linear_x: clampedLinearX, angular_z: clampedAngularZ }),
+        signal,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail?.[0]?.msg ?? body?.detail ?? `HTTP ${res.status}`);
+      }
+      return await res.json();
+    } catch (err) {
+      console.error("sendCmdVel error:", err);
+      return null;
+    }
+  }
+
+  async sendTeleop(
+    linearX: number,
+    angularZ: number,
+    command: string = "stop"
+  ): Promise<{ linear_x: number; angular_z: number; command: string; upstream_published: boolean } | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/robot/teleop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linear_x: linearX, angular_z: angularZ, command }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async captureLidarPcd(signal?: AbortSignal): Promise<{
+    buffer: ArrayBuffer;
+    frameId: string;
+    sizeBytes: number;
+    source: string;
+  }> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 65_000);
+    const combinedSignal = signal || controller.signal;
+
+    try {
+      const res = await fetch(`${this.baseUrl}/api/lidar/capture.pcd`, {
+        method: "GET",
+        cache: "no-store",
+        signal: combinedSignal,
+      });
+
+      if (!res.ok) {
+        let detail = `Capture failed (HTTP ${res.status})`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // Fall through
+        }
+        throw new Error(detail);
+      }
+
+      const frameId = res.headers.get("X-PointCloud-Frame-Id") || "camera_init";
+      const source = res.headers.get("X-PointCloud-Source") || "live";
+      const buffer = await res.arrayBuffer();
+
+      return {
+        buffer,
+        frameId,
+        sizeBytes: buffer.byteLength,
+        source,
+      };
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }

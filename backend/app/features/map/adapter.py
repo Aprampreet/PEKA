@@ -12,6 +12,18 @@ class MapAdapter:
 
     def __init__(self):
         self._cached_demo_map: List[List[int]] = self._generate_deterministic_grid()
+        self._robot_x: float = 0.0
+        self._robot_y: float = 0.0
+        self._robot_yaw: float = 45.0
+
+    def update_teleop_pose(self, linear_x: float, angular_z: float, dt: float = 0.2):
+        import math
+        # Update yaw angle
+        self._robot_yaw = (self._robot_yaw + (angular_z * 180.0 / math.pi) * dt) % 360.0
+        # Update translation along heading
+        rad = math.radians(self._robot_yaw)
+        self._robot_x += linear_x * math.cos(rad) * dt
+        self._robot_y += linear_x * math.sin(rad) * dt
 
     def _generate_deterministic_grid(self) -> List[List[int]]:
         """
@@ -69,11 +81,11 @@ class MapAdapter:
             ),
             grid=self._cached_demo_map,
             simulated_robot_pose=SimulatedRobotPose(
-                x=0.0,
-                y=0.0,
-                yaw_deg=45.0,
+                x=round(self._robot_x, 2),
+                y=round(self._robot_y, 2),
+                yaw_deg=round(self._robot_yaw, 1),
                 is_simulated=True,
-                notice="Simulated coordinates for UI development only. Real robot API provides no pose endpoint."
+                notice="Simulated coordinates with active teleop tracking."
             ),
             contract_docs={
                 "target_ros2_message": "nav_msgs/msg/OccupancyGrid",

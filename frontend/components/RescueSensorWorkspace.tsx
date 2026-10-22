@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { LiveCameraCard } from "./LiveCameraCard";
 import { ThermalViewer } from "./ThermalViewer";
 import { LidarViewer } from "./LidarViewer";
+import { RoverSpeakerPanel } from "./RoverSpeakerPanel";
 import { ObservationRecord } from "../lib/types";
 import {
   Video,
@@ -179,7 +180,19 @@ export const RescueSensorWorkspace: React.FC<RescueSensorWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* 3. Evidence Association & Candidate Cross-Inspection Section */}
+      {/* 3. Rover PA Speaker & Autonomous AI Reassurance Console */}
+      <RoverSpeakerPanel
+        selectedPersonName={latestObservation?.person_name || null}
+        selectedDistanceM={
+          latestObservation?.distance_m ||
+          (activeCandidate.lidarCoords
+            ? Number(Math.hypot(activeCandidate.lidarCoords.x, activeCandidate.lidarCoords.y).toFixed(1))
+            : 2.1)
+        }
+        currentSector="Sector 3 North"
+      />
+
+      {/* 4. Evidence Association & Candidate Cross-Inspection Section */}
       <div className="rounded-md border border-[#D8D9D1] bg-[#FFFFFF] p-4 space-y-3.5 shadow-xs">
         {/* Header & Candidate Selector */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#D8D9D1] pb-3">

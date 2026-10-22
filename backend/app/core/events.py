@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class ActivityEvent(BaseModel):
     id: str
     timestamp: str
-    category: Literal["connection", "command", "camera", "system", "perception"]
+    category: Literal["connection", "command", "camera", "system", "perception", "speaker"]
     level: Literal["info", "warning", "error", "success"]
     message: str
     is_simulated: bool = False

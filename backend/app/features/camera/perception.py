@@ -443,6 +443,13 @@ class PerceptionEngine:
                     level="success" if match else "warning",
                     message=f"👀 Live detection: {name_str} {sim_str} spotted at ~{est_distance}m. Observation logged ({obs_code})."
                 )
+
+                # Trigger Autonomous AI Survivor Reassurance broadcast through rover speaker
+                try:
+                    from app.features.speaker.service import speaker_service
+                    speaker_service.handle_face_detected(match=match, distance_m=est_distance)
+                except Exception:
+                    pass
             except Exception as e:
                 event_logger.log(
                     category="perception",

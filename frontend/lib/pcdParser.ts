@@ -47,104 +47,41 @@ function decompressLZF(inData: Uint8Array, outLen: number): Uint8Array {
   return out;
 }
 
-export type MapColorPalette = "monochrome" | "cyber_slate" | "tactical_amber" | "matrix_emerald" | "rainbow";
-
-// Height-to-Color Elevation Gradient supporting Tactical Black & Gray Monochrome
+// Authentic Multi-Color Elevation Gradient (Standard ROS RViz / Point-LIO Jet Colormap)
 export function elevationToColor(
   z: number,
   minZ: number,
-  maxZ: number,
-  palette: MapColorPalette = "monochrome"
+  maxZ: number
 ): [number, number, number] {
   const t = Math.max(0, Math.min(1, (z - minZ) / Math.max(0.01, maxZ - minZ)));
 
-  if (palette === "monochrome") {
-    // Exceptional Tactical Black & Gray / Monochrome Carbon & Silver Theme:
-    // Floor/Lower Ground: Deep Gunmetal / Charcoal (dark, rich contrast against black canvas)
-    // Mid Elevation / Walls: Slate & Medium Graphite Gray
-    // Upper Features / Ceilings: Platinum & Brilliant Crisp Silver-White
-    if (t < 0.2) {
-      const s = t / 0.2;
-      const v = 0.22 + s * 0.16; // 0.22 -> 0.38
-      return [v * 0.95, v, v * 1.05];
-    } else if (t < 0.5) {
-      const s = (t - 0.2) / 0.3;
-      const v = 0.38 + s * 0.25; // 0.38 -> 0.63
-      return [v * 0.97, v, v * 1.04];
-    } else if (t < 0.8) {
-      const s = (t - 0.5) / 0.3;
-      const v = 0.63 + s * 0.24; // 0.63 -> 0.87
-      return [v * 0.98, v, v * 1.02];
-    } else {
-      const s = (t - 0.8) / 0.2;
-      const v = 0.87 + s * 0.13; // 0.87 -> 1.0
-      return [v, v, v];
-    }
-  } else if (palette === "cyber_slate") {
-    // Dark Charcoal / Slate with Icy Cyan Highlights
-    if (t < 0.35) {
-      const s = t / 0.35;
-      return [0.18 + s * 0.15, 0.22 + s * 0.25, 0.28 + s * 0.35];
-    } else if (t < 0.75) {
-      const s = (t - 0.35) / 0.4;
-      return [0.33 * (1 - s * 0.5), 0.47 + s * 0.4, 0.63 + s * 0.35];
-    } else {
-      const s = (t - 0.75) / 0.25;
-      return [0.16 + s * 0.6, 0.87 + s * 0.13, 0.98 + s * 0.02];
-    }
-  } else if (palette === "tactical_amber") {
-    // Matte Carbon Black with Bronze, Amber, and Gold Highlights
-    if (t < 0.3) {
-      const s = t / 0.3;
-      return [0.24 + s * 0.2, 0.18 + s * 0.12, 0.14 + s * 0.08];
-    } else if (t < 0.7) {
-      const s = (t - 0.3) / 0.4;
-      return [0.44 + s * 0.46, 0.30 + s * 0.40, 0.22 + s * 0.15];
-    } else {
-      const s = (t - 0.7) / 0.3;
-      return [0.90 + s * 0.1, 0.70 + s * 0.25, 0.37 + s * 0.45];
-    }
-  } else if (palette === "matrix_emerald") {
-    // FLIR Tactical Night-Vision: Dark Gunmetal -> Sage -> Crisp Emerald
-    if (t < 0.3) {
-      const s = t / 0.3;
-      return [0.14 + s * 0.1, 0.22 + s * 0.25, 0.18 + s * 0.15];
-    } else if (t < 0.7) {
-      const s = (t - 0.3) / 0.4;
-      return [0.24 * (1 - s * 0.5), 0.47 + s * 0.43, 0.33 * (1 - s * 0.3)];
-    } else {
-      const s = (t - 0.7) / 0.3;
-      return [0.12 + s * 0.6, 0.90 + s * 0.1, 0.23 + s * 0.65];
-    }
+  // Standard RViz Jet Rainbow: Blue (Floor) -> Cyan -> Green -> Yellow -> Red (Ceiling)
+  let r = 0, g = 0, b = 0;
+  if (t < 0.25) {
+    const s = t / 0.25;
+    r = 0.05;
+    g = s * 0.85;
+    b = 0.95;
+  } else if (t < 0.5) {
+    const s = (t - 0.25) / 0.25;
+    r = 0.05 + s * 0.2;
+    g = 0.85 + s * 0.15;
+    b = 0.95 * (1.0 - s);
+  } else if (t < 0.75) {
+    const s = (t - 0.5) / 0.25;
+    r = 0.25 + s * 0.75;
+    g = 1.0 - s * 0.35;
+    b = 0.05;
   } else {
-    // RViz Jet Rainbow: Blue -> Cyan -> Green -> Yellow -> Red
-    let r = 0, g = 0, b = 0;
-    if (t < 0.25) {
-      const s = t / 0.25;
-      r = 0.05;
-      g = s * 0.8;
-      b = 0.9;
-    } else if (t < 0.5) {
-      const s = (t - 0.25) / 0.25;
-      r = 0.05 + s * 0.2;
-      g = 0.8 + s * 0.2;
-      b = 0.9 * (1.0 - s);
-    } else if (t < 0.75) {
-      const s = (t - 0.5) / 0.25;
-      r = 0.25 + s * 0.75;
-      g = 1.0 - s * 0.4;
-      b = 0.05;
-    } else {
-      const s = (t - 0.75) / 0.25;
-      r = 1.0;
-      g = 0.6 * (1.0 - s);
-      b = s * 0.4;
-    }
-    return [r, g, b];
+    const s = (t - 0.75) / 0.25;
+    r = 1.0;
+    g = 0.65 * (1.0 - s);
+    b = s * 0.2;
   }
+  return [r, g, b];
 }
 
-export function parsePCD(arrayBuffer: ArrayBuffer, palette: MapColorPalette = "monochrome"): ParsedPCD {
+export function parsePCD(arrayBuffer: ArrayBuffer): ParsedPCD {
   const bytes = new Uint8Array(arrayBuffer);
   let headerText = "";
   let headerEnd = 0;
@@ -307,7 +244,7 @@ export function parsePCD(arrayBuffer: ArrayBuffer, palette: MapColorPalette = "m
   let cIdx = 0;
   for (let i = 0; i < numPoints; i++) {
     const z = positions[i * 3 + 2];
-    const [r, g, b] = elevationToColor(z, minZ, maxZ, palette);
+    const [r, g, b] = elevationToColor(z, minZ, maxZ);
     colors[cIdx] = r;
     colors[cIdx + 1] = g;
     colors[cIdx + 2] = b;

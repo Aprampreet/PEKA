@@ -238,3 +238,28 @@ export interface ReverseGeocodeResult {
   postcode?: string;
   source: string;
 }
+
+export interface SpeakerStatus {
+  auto_broadcast_enabled: boolean;
+  cooldown_remaining_sec: number;
+  last_broadcast_text?: string | null;
+  last_broadcast_time?: string | null;
+  rover_speaker_url: string;
+}
+
+export interface BroadcastResult {
+  success: boolean;
+  message_text: string;
+  language: string;
+  rover_dispatched: boolean;
+  rover_status: string;
+  played_locally: boolean;
+  timestamp: string;
+}
+
+export interface AIGeneratedReassurance {
+  generated_text: string;
+  language: string;
+  context_summary: string;
+}
+

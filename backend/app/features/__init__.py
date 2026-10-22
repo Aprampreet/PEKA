@@ -6,6 +6,7 @@ from app.features.recognition.router import router as recognition_router
 from app.features.observations.router import router as observations_router
 from app.features.registry.router import router as registry_router
 from app.features.events.router import router as events_router
+from app.features.speaker.router import router as speaker_router
 
 __all__ = [
     "robot_router",
@@ -16,4 +17,5 @@ __all__ = [
     "observations_router",
     "registry_router",
     "events_router",
+    "speaker_router",
 ]

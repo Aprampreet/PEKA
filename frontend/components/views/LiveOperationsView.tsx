@@ -6,6 +6,8 @@ import { RobotControls } from "../RobotControls";
 import { ObservationRecord, RobotInfo, RobotStatus } from "../../lib/types";
 import { Radio } from "lucide-react";
 
+import { TeleopController } from "../TeleopController";
+
 interface LiveOperationsViewProps {
   robotInfo: RobotInfo | null;
   robotStatus: RobotStatus | null;
@@ -66,12 +68,20 @@ export const LiveOperationsView: React.FC<LiveOperationsViewProps> = ({
         latestObservation={observations[0] || null}
       />
 
-      {/* 3. Compact Separated Control Area */}
-      <div className="max-w-xl">
-        <RobotControls
-          isLiveMode={Boolean(robotInfo?.upstream_connected)}
-          onCommandDispatched={() => onRefresh()}
-        />
+      {/* 3. Operational Command & Teleoperation Center */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Left (7 cols): Manual Driving Teleoperation */}
+        <div className="lg:col-span-7">
+          <TeleopController onPoseUpdate={() => onRefresh()} />
+        </div>
+
+        {/* Right (5 cols): Mission Patrol Controls */}
+        <div className="lg:col-span-5">
+          <RobotControls
+            isLiveMode={Boolean(robotInfo?.upstream_connected)}
+            onCommandDispatched={() => onRefresh()}
+          />
+        </div>
       </div>
     </div>
   );

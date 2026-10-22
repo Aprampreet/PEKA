@@ -26,6 +26,7 @@ from app.features.observations.router import router as observations_router
 from app.features.registry.router import router as registry_router
 from app.features.events.router import router as events_router
 from app.features.emergency.router import router as emergency_router
+from app.features.speaker.router import router as speaker_router
 
 
 @asynccontextmanager
@@ -86,3 +87,4 @@ app.include_router(observations_router)
 app.include_router(registry_router)
 app.include_router(events_router)
 app.include_router(emergency_router)
+app.include_router(speaker_router)

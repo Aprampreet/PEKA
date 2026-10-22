@@ -47,3 +47,45 @@ async def post_robot_command(request: RobotCommandRequest):
     Confirms publication to ROS bridge (does NOT claim physical execution).
     """
     return await robot_client.send_command(request.command)
+
+
+from pydantic import BaseModel, Field
+from typing import Optional
+
+
+class CmdVelRequest(BaseModel):
+    linear_x: float = Field(0.0, ge=-0.5, le=0.5, description="Linear velocity in m/s (-0.5 to 0.5)")
+    angular_z: float = Field(0.0, ge=-1.0, le=1.0, description="Angular velocity in rad/s (-1.0 to 1.0)")
+
+
+class CmdVelResponse(BaseModel):
+    success: bool
+    topic: str = "/cmd_vel"
+    linear_x: float
+    angular_z: float
+    message: str
+
+
+@router.post("/api/robot/cmd_vel", response_model=CmdVelResponse)
+async def post_cmd_vel(request: CmdVelRequest):
+    """
+    Publishes one geometry_msgs/msg/Twist message to ROS 2 /cmd_vel topic.
+    Strictly adheres to teammate's ROS 2 bridge API spec.
+    """
+    return await robot_client.send_cmd_vel(request.linear_x, request.angular_z)
+
+
+class TeleopRequest(BaseModel):
+    linear_x: float = Field(0.0, description="Forward/backward linear velocity in m/s")
+    angular_z: float = Field(0.0, description="Rotational angular velocity in rad/s")
+    command: Optional[str] = Field("stop", description="Action tag: forward, backward, left, right, stop")
+
+
+@router.post("/api/robot/teleop")
+async def post_robot_teleop(request: TeleopRequest):
+    """
+    Real-time teleoperation driving controller for manual rover navigation.
+    Publishes linear and angular velocity to ROS 2 /cmd_vel and advances map coordinates.
+    """
+    return await robot_client.send_teleop(request.linear_x, request.angular_z, request.command or "drive")
+

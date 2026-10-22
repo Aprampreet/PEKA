@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
@@ -12,9 +12,15 @@ import {
   Compass,
   Navigation,
   Scan,
+  Radio,
+  Download,
+  AlertCircle,
+  CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
-import { parsePCD, ParsedPCD, elevationToColor, MapColorPalette } from "../lib/pcdParser";
+import { parsePCD, ParsedPCD } from "../lib/pcdParser";
 import { useDashboard } from "../lib/DashboardContext";
+import { api } from "../lib/api";
 
 interface LidarViewerProps {
   selectedCandidateCoords?: { x: number; y: number; z: number } | null;
@@ -42,8 +48,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadProgress, setLoadProgress] = useState<number>(0);
   const [pointCount, setPointCount] = useState<number>(0);
-  const [colorMode, setColorMode] = useState<MapColorPalette>("monochrome");
-  const [pointSize, setPointSize] = useState<number>(0.065);
+  const [pointSize, setPointSize] = useState<number>(0.06);
   const [isFollowingRobot, setIsFollowingRobot] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [cameraPreset, setCameraPreset] = useState<"orbit" | "topdown" | "follow">("orbit");
@@ -53,6 +58,22 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     center: [number, number, number];
     size: [number, number, number];
   } | null>(null);
+
+  // Live Continuous PCD Auto-Update State
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(true);
+  const [isCapturingPcd, setIsCapturingPcd] = useState<boolean>(false);
+  const [captureSecondsLeft, setCaptureSecondsLeft] = useState<number>(30);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [lastCaptureInfo, setLastCaptureInfo] = useState<{
+    timestamp: string;
+    points: number;
+    frameId: string;
+    sizeBytes: number;
+    source: string;
+  } | null>(null);
+  const [rawPcdBlobUrl, setRawPcdBlobUrl] = useState<string | null>(null);
+  const captureAbortRef = useRef<AbortController | null>(null);
+  const isCapturingRef = useRef<boolean>(false);
 
   const [livePose, setLivePose] = useState<{ x: number; y: number; z: number; yawDeg: number }>({
     x: 0,
@@ -64,60 +85,10 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
   const parsedPCDRef = useRef<ParsedPCD | null>(null);
   const trajectoryCoordsRef = useRef<number[]>([]);
 
-  // Palettes definition for user selector
-  const PALETTES: { id: MapColorPalette; label: string; preview: string; desc: string }[] = useMemo(
-    () => [
-      {
-        id: "monochrome",
-        label: "Stealth Gray",
-        preview: "from-zinc-900 via-slate-400 to-white",
-        desc: "Tactical Charcoal & Silver Monochrome",
-      },
-      {
-        id: "cyber_slate",
-        label: "Cyber Slate",
-        preview: "from-slate-900 via-sky-600 to-cyan-300",
-        desc: "Graphite with Icy Cyan Highlights",
-      },
-      {
-        id: "tactical_amber",
-        label: "Amber Alert",
-        preview: "from-stone-900 via-amber-600 to-yellow-300",
-        desc: "Matte Carbon with Warm Bronze & Gold",
-      },
-      {
-        id: "matrix_emerald",
-        label: "Night Vision",
-        preview: "from-neutral-900 via-emerald-700 to-emerald-300",
-        desc: "Military FLIR Night-Vision Green",
-      },
-      {
-        id: "rainbow",
-        label: "RViz Rainbow",
-        preview: "from-blue-600 via-emerald-400 to-red-500",
-        desc: "Standard Jet Spectrum",
-      },
-    ],
-    []
-  );
-
-  // 1. Fetch & Parse PCD file
-  const loadPcdFile = useCallback(async (url: string) => {
-    setIsLoading(true);
-    setLoadProgress(15);
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
-      }
-
-      setLoadProgress(45);
-      const arrayBuffer = await response.arrayBuffer();
-
-      setLoadProgress(75);
-      const parsed = parsePCD(arrayBuffer, colorMode);
+  // Apply parsed PCD buffer to Three.js scene
+  const applyParsedPCD = useCallback(
+    (parsed: ParsedPCD, recenterCamera: boolean = false) => {
       parsedPCDRef.current = parsed;
-
       setPointCount(parsed.pointCount);
       setMapBounds({
         min: parsed.min,
@@ -126,7 +97,6 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
         size: parsed.size,
       });
 
-      // Build Three.js Point Cloud
       if (sceneRef.current) {
         if (pointsMeshRef.current) {
           sceneRef.current.remove(pointsMeshRef.current);
@@ -147,29 +117,159 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
           vertexColors: true,
           sizeAttenuation: true,
           transparent: true,
-          opacity: 0.96,
+          opacity: 0.95,
         });
 
         const points = new THREE.Points(geometry, material);
         sceneRef.current.add(points);
         pointsMeshRef.current = points;
 
-        // Position initial camera to view entire facility in heroic isometric angle
-        if (cameraRef.current && controlsRef.current) {
+        if (recenterCamera && cameraRef.current && controlsRef.current) {
           const [cx, cy, cz] = parsed.center;
           controlsRef.current.target.set(cx, cy, cz);
           cameraRef.current.position.set(cx - 30, cy - 38, cz + 26);
           controlsRef.current.update();
         }
       }
+    },
+    [pointSize]
+  );
 
-      setLoadProgress(100);
-    } catch (err) {
-      console.error("Error loading PCD file:", err);
+  // 1. Fetch & Parse PCD file (Original Multi-Color RViz Jet Spectrum)
+  const loadPcdFile = useCallback(
+    async (url: string) => {
+      setIsLoading(true);
+      setLoadProgress(15);
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+        }
+
+        setLoadProgress(45);
+        const arrayBuffer = await response.arrayBuffer();
+
+        setLoadProgress(75);
+        const parsed = parsePCD(arrayBuffer);
+        applyParsedPCD(parsed, true);
+
+        setLoadProgress(100);
+      } catch (err) {
+        console.error("Error loading PCD file:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [applyParsedPCD]
+  );
+
+  // 30-Second Live PCD Capture Handler
+  const handleCapturePcd = useCallback(async () => {
+    if (isCapturingRef.current) return;
+    isCapturingRef.current = true;
+    setIsCapturingPcd(true);
+    setCaptureSecondsLeft(30);
+    setCaptureError(null);
+
+    const controller = new AbortController();
+    captureAbortRef.current = controller;
+
+    // Countdown interval
+    const interval = setInterval(() => {
+      setCaptureSecondsLeft((prev) => (prev > 1 ? prev - 1 : 1));
+    }, 1000);
+
+    try {
+      const result = await api.captureLidarPcd(controller.signal);
+      clearInterval(interval);
+
+      if (result?.buffer) {
+        // Create downloadable ObjectURL
+        const blob = new Blob([result.buffer], { type: "application/vnd.pcd" });
+        const blobUrl = URL.createObjectURL(blob);
+        setRawPcdBlobUrl(blobUrl);
+
+        // Parse and apply directly to 3D scene in real time
+        const parsed = parsePCD(result.buffer);
+        applyParsedPCD(parsed, false);
+
+        setLastCaptureInfo({
+          timestamp: new Date().toLocaleTimeString(),
+          points: parsed.pointCount,
+          frameId: result.frameId,
+          sizeBytes: result.sizeBytes,
+          source: result.source,
+        });
+      }
+    } catch (err: unknown) {
+      clearInterval(interval);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("AbortError")) {
+        setCaptureError(msg || "Failed to capture 30s PCD from LiDAR topic.");
+      }
     } finally {
-      setIsLoading(false);
+      clearInterval(interval);
+      isCapturingRef.current = false;
+      setIsCapturingPcd(false);
+      captureAbortRef.current = null;
     }
-  }, [colorMode, pointSize]);
+  }, [applyParsedPCD]);
+
+  // Continuous Auto-Update Loop
+  useEffect(() => {
+    let isCancelled = false;
+    let loopTimeout: NodeJS.Timeout | null = null;
+
+    const cycle = async () => {
+      if (isCancelled || !autoSyncEnabled) return;
+      await handleCapturePcd();
+      if (isCancelled || !autoSyncEnabled) return;
+
+      // 3.5s cooldown before starting next 30s capture
+      loopTimeout = setTimeout(() => {
+        if (!isCancelled && autoSyncEnabled) {
+          cycle();
+        }
+      }, 3500);
+    };
+
+    if (autoSyncEnabled) {
+      loopTimeout = setTimeout(() => {
+        cycle();
+      }, 2000);
+    }
+
+    return () => {
+      isCancelled = true;
+      if (loopTimeout) clearTimeout(loopTimeout);
+      if (captureAbortRef.current) {
+        captureAbortRef.current.abort();
+      }
+    };
+  }, [autoSyncEnabled, handleCapturePcd]);
+
+  const handleCancelCapture = () => {
+    if (captureAbortRef.current) {
+      captureAbortRef.current.abort();
+    }
+  };
+
+  const handleDownloadPcd = () => {
+    const url = rawPcdBlobUrl || pcdUrl;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `cloud_capture_${Date.now()}.pcd`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  // Dynamic point size update without reloading geometry
+  useEffect(() => {
+    if (pointsMeshRef.current && pointsMeshRef.current.material) {
+      (pointsMeshRef.current.material as THREE.PointsMaterial).size = pointSize;
+    }
+  }, [pointSize]);
 
   // 2. Initialize Three.js Scene, Camera, Renderer, Controls
   useEffect(() => {
@@ -179,10 +279,9 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     const width = container.clientWidth || 640;
     const height = container.clientHeight || 400;
 
-    // Tactical Obsidian Scene with Fog
+    // Dark Stage Scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x07080a); // Deep pitch obsidian black
-    scene.fog = new THREE.FogExp2(0x07080a, 0.0065); // Atmospheric depth fade
+    scene.background = new THREE.Color(0x0e1117); // Dark clean navy-charcoal background
     sceneRef.current = scene;
 
     // Camera (Z is UP to strictly match Point-LIO / ROS 2 coordinate frame)
@@ -191,12 +290,10 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     camera.position.set(-20, -32, 22);
     cameraRef.current = camera;
 
-    // WebGL Renderer with High-DPI support
+    // WebGL Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
     container.innerHTML = "";
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -211,45 +308,12 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     controls.maxDistance = 280;
     controlsRef.current = controls;
 
-    // ==========================================
-    // Tactical Ground Reference Grid & Radar Rings
-    // ==========================================
-    const groundZ = -1.9; // Lowest ground floor level
-
-    // High-tech Tactical Floor Grid (Charcoal & Graphite)
-    const gridHelper = new THREE.GridHelper(100, 50, 0x2e3542, 0x141820);
+    // Tactical Ground Reference Grid
+    const groundZ = -1.9;
+    const gridHelper = new THREE.GridHelper(100, 50, 0x06b6d4, 0x1e293b);
     gridHelper.rotation.x = Math.PI / 2;
     gridHelper.position.z = groundZ;
     scene.add(gridHelper);
-
-    // Concentric Radar Distance Rings (10m, 20m, 30m, 40m, 50m)
-    const radarGroup = new THREE.Group();
-    radarGroup.name = "radarRings";
-    const ringRadii = [10, 20, 30, 40, 50];
-    ringRadii.forEach((r, idx) => {
-      const ringGeo = new THREE.RingGeometry(r - 0.05, r + 0.05, 64);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: idx % 2 === 0 ? 0x2e3846 : 0x1f2630,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.6,
-      });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      ringMesh.position.z = groundZ + 0.01;
-      radarGroup.add(ringMesh);
-    });
-
-    // Cardinal Axes on Ground Grid (Subtle Silver & Slate)
-    const cardinalMat = new THREE.LineBasicMaterial({ color: 0x3e495a, transparent: true, opacity: 0.7 });
-    const cardinalGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-50, 0, groundZ + 0.02),
-      new THREE.Vector3(50, 0, groundZ + 0.02),
-      new THREE.Vector3(0, -50, groundZ + 0.02),
-      new THREE.Vector3(0, 50, groundZ + 0.02),
-    ]);
-    const cardinalLines = new THREE.LineSegments(cardinalGeo, cardinalMat);
-    radarGroup.add(cardinalLines);
-    scene.add(radarGroup);
 
     // Glowing Coordinate Origin Axes (X: Red, Y: Green, Z: Blue)
     const axes = new THREE.AxesHelper(3.5);
@@ -264,7 +328,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     scene.add(dirLight);
 
     // ==========================================
-    // 3. Construct High-Tech 3D Robot & LiDAR Marker
+    // 3. Construct 3D Robot & LiDAR Marker
     // ==========================================
     const robotGroup = new THREE.Group();
     robotGroupRef.current = robotGroup;
@@ -272,7 +336,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     // Base Pulsing Sonar Ring 1
     const haloGeo1 = new THREE.RingGeometry(0.55, 0.82, 36);
     const haloMat1 = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
+      color: 0x06b6d4,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.85,
@@ -281,48 +345,23 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     haloMesh1.name = "halo1";
     robotGroup.add(haloMesh1);
 
-    // Expanding Sonar Ring 2
-    const haloGeo2 = new THREE.RingGeometry(0.85, 1.15, 36);
-    const haloMat2 = new THREE.MeshBasicMaterial({
-      color: 0x94a3b8,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.45,
-    });
-    const haloMesh2 = new THREE.Mesh(haloGeo2, haloMat2);
-    haloMesh2.name = "halo2";
-    robotGroup.add(haloMesh2);
-
-    // Robot Armored Chassis Box (Dark Titanium / Gunmetal finish)
+    // Robot Armored Chassis Box
     const bodyGeo = new THREE.BoxGeometry(0.72, 0.52, 0.28);
     const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x141820,
-      roughness: 0.25,
-      metalness: 0.85,
+      color: 0x1e293b,
+      roughness: 0.3,
+      metalness: 0.7,
     });
     const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
     bodyMesh.position.z = 0.24;
     robotGroup.add(bodyMesh);
 
-    // Chassis Top Armor Plate
-    const plateGeo = new THREE.BoxGeometry(0.55, 0.38, 0.06);
-    const plateMat = new THREE.MeshStandardMaterial({
-      color: 0x222834,
-      roughness: 0.3,
-      metalness: 0.7,
-    });
-    const plateMesh = new THREE.Mesh(plateGeo, plateMat);
-    plateMesh.position.z = 0.4;
-    robotGroup.add(plateMesh);
-
-    // Rotating LiDAR Sensor Turret (Livox / Velodyne style)
+    // Rotating LiDAR Sensor Turret
     const domeGeo = new THREE.CylinderGeometry(0.14, 0.16, 0.18, 28);
     const domeMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
+      color: 0x06b6d4,
+      emissive: 0x0891b2,
       emissiveIntensity: 0.9,
-      roughness: 0.2,
-      metalness: 0.8,
     });
     const domeMesh = new THREE.Mesh(domeGeo, domeMat);
     domeMesh.name = "lidarDome";
@@ -330,7 +369,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     domeMesh.position.z = 0.52;
     robotGroup.add(domeMesh);
 
-    // Forward Direction Pointer Arrow (Bright Cyan)
+    // Forward Direction Pointer Arrow (Cyan)
     const arrowGeo = new THREE.ConeGeometry(0.18, 0.48, 16);
     const arrowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     const arrowMesh = new THREE.Mesh(arrowGeo, arrowMat);
@@ -339,32 +378,12 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     arrowMesh.position.set(0.68, 0, 0.24);
     robotGroup.add(arrowMesh);
 
-    // Forward LED Searchlights (Twin Cones)
-    const spotGeo = new THREE.ConeGeometry(0.8, 3.2, 16, 1, true);
-    const spotMat = new THREE.MeshBasicMaterial({
-      color: 0xf8fafc,
-      transparent: true,
-      opacity: 0.12,
-      side: THREE.DoubleSide,
-    });
-    const spotLeft = new THREE.Mesh(spotGeo, spotMat);
-    spotLeft.rotation.z = -Math.PI / 2;
-    spotLeft.rotation.x = Math.PI / 2;
-    spotLeft.position.set(1.9, -0.16, 0.3);
-    robotGroup.add(spotLeft);
-
-    const spotRight = new THREE.Mesh(spotGeo, spotMat);
-    spotRight.rotation.z = -Math.PI / 2;
-    spotRight.rotation.x = Math.PI / 2;
-    spotRight.position.set(1.9, 0.16, 0.3);
-    robotGroup.add(spotRight);
-
     // Real-Time 360° LiDAR Dynamic Sweeping Scan Fan
-    const sweepGeo = new THREE.RingGeometry(0.5, 6.5, 32, 1, 0, Math.PI / 4);
+    const sweepGeo = new THREE.RingGeometry(0.5, 6.0, 32, 1, 0, Math.PI / 4);
     const sweepMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
+      color: 0x06b6d4,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.2,
       side: THREE.DoubleSide,
     });
     const sweepMesh = new THREE.Mesh(sweepGeo, sweepMat);
@@ -375,7 +394,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
 
     scene.add(robotGroup);
 
-    // Trajectory Polyline (Stealth Silver / Cyan)
+    // Trajectory Polyline (Cyan)
     const trajGeo = new THREE.BufferGeometry();
     const trajMat = new THREE.LineBasicMaterial({
       color: 0x38bdf8,
@@ -391,25 +410,18 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     loadPcdFile(pcdUrl);
 
     // Animation Loop
-    let clock = new THREE.Clock();
+    const startTime = performance.now();
     const animate = () => {
       animFrameIdRef.current = requestAnimationFrame(animate);
 
-      const elapsedTime = clock.getElapsedTime();
+      const elapsedTime = (performance.now() - startTime) * 0.001;
 
-      // Pulsate ground sonar halos
+      // Pulsate ground sonar halo
       const halo1 = robotGroup.getObjectByName("halo1") as THREE.Mesh;
       if (halo1) {
         const scale1 = 1.0 + Math.sin(elapsedTime * 4.0) * 0.15;
         halo1.scale.set(scale1, scale1, 1);
         (halo1.material as THREE.MeshBasicMaterial).opacity = 0.5 + Math.sin(elapsedTime * 4.0) * 0.35;
-      }
-
-      const halo2 = robotGroup.getObjectByName("halo2") as THREE.Mesh;
-      if (halo2) {
-        const scale2 = 1.0 + Math.cos(elapsedTime * 3.0) * 0.22;
-        halo2.scale.set(scale2, scale2, 1);
-        (halo2.material as THREE.MeshBasicMaterial).opacity = 0.25 + Math.cos(elapsedTime * 3.0) * 0.2;
       }
 
       // Rotate LiDAR Sensor Turret & Sweeping Fan (Simulates 10 Hz rotation)
@@ -418,7 +430,7 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
         dome.rotation.y = elapsedTime * 8.0;
       }
       if (lidarSweepMeshRef.current) {
-        lidarSweepMeshRef.current.rotation.z = elapsedTime * 6.28; // Full continuous 360 sweep
+        lidarSweepMeshRef.current.rotation.z = elapsedTime * 6.28;
       }
 
       controls.update();
@@ -449,34 +461,13 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
     };
   }, [loadPcdFile, pcdUrl]);
 
-  // 4. Update Colors when Palette Changes
-  useEffect(() => {
-    if (!parsedPCDRef.current || !pointsMeshRef.current) return;
-    const { positions, min, max, pointCount } = parsedPCDRef.current;
-    const colors = new Float32Array(pointCount * 3);
-
-    let cIdx = 0;
-    for (let i = 0; i < pointCount; i++) {
-      const z = positions[i * 3 + 2];
-      const [r, g, b] = elevationToColor(z, min[2], max[2], colorMode);
-      colors[cIdx] = r;
-      colors[cIdx + 1] = g;
-      colors[cIdx + 2] = b;
-      cIdx += 3;
-    }
-
-    const geom = pointsMeshRef.current.geometry;
-    geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    geom.attributes.color.needsUpdate = true;
-  }, [colorMode]);
-
-  // 5. Update Point Size
+  // 3. Update Point Size
   useEffect(() => {
     if (!pointsMeshRef.current) return;
     (pointsMeshRef.current.material as THREE.PointsMaterial).size = pointSize;
   }, [pointSize]);
 
-  // 6. Live LiDAR / Robot Tracking Synchronization
+  // 4. Live LiDAR / Robot Tracking Synchronization
   useEffect(() => {
     let animId: any;
     let t = 0;
@@ -574,221 +565,226 @@ export const LidarViewer: React.FC<LidarViewerProps> = ({
 
   return (
     <div
-      className={`relative rounded-lg border border-[#232832] bg-[#07080a] overflow-hidden flex flex-col shadow-2xl ${
+      className={`relative rounded-lg border border-[#D8D9D1] bg-[#0E1117] overflow-hidden flex flex-col shadow-lg ${
         isFullscreen ? "fixed inset-0 z-50 rounded-none border-none" : "w-full"
       }`}
     >
-      {/* 1. Tactical Stealth Header Toolbar */}
-      <div className="px-3.5 py-2.5 bg-[#0c0e13]/95 backdrop-blur-md border-b border-[#1f242e] flex items-center justify-between gap-3 z-10 flex-wrap">
-        {/* Left: Title & Point Count Badge */}
+      {/* 1. Ultra-Sleek Glassmorphic Header Toolbar */}
+      <div className="px-3 py-2 bg-[#161B22]/95 border-b border-[#21262D] flex items-center justify-between gap-3 z-10 backdrop-blur-md">
+        {/* Left: Streamlined Title & Live Sync Status */}
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-md bg-white/5 border border-white/10 text-cyan-400">
-            <Scan className="w-4 h-4 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-white tracking-wider uppercase font-mono">
-                3D Point-LIO SLAM Cloud
-              </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                {pointCount > 0 ? `${(pointCount / 1000).toFixed(0)}k PTS` : "MAPPING"}
-              </span>
-            </div>
-            <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
-              Source: map.pcd • ROS 2 /cloud_registered • Z-Up Frame
+          <div className="flex items-center gap-1.5 font-mono">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
+            <span className="text-xs font-semibold text-white tracking-wide uppercase">
+              3D LiDAR Map
             </span>
           </div>
+
+          <div className="h-3 w-px bg-slate-700 hidden sm:block" />
+
+          {/* Auto-Sync Toggle Badge */}
+          <button
+            onClick={() => setAutoSyncEnabled((prev) => !prev)}
+            className={`px-2 py-0.5 rounded-full text-[10px] font-mono transition cursor-pointer flex items-center gap-1.5 border ${
+              autoSyncEnabled
+                ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-300"
+                : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200"
+            }`}
+            title={
+              autoSyncEnabled
+                ? "Continuous 3D sync active. Click to pause."
+                : "Sync paused. Click to resume continuous updates."
+            }
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                autoSyncEnabled ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
+              }`}
+            />
+            <span>
+              {autoSyncEnabled
+                ? isCapturingPcd
+                  ? `Syncing (${captureSecondsLeft}s)`
+                  : "Live Sync"
+                : "Sync Paused"}
+            </span>
+          </button>
         </div>
 
-        {/* Center: Live Robot Coordinates HUD */}
-        <div className="flex items-center gap-2.5 px-3 py-1 rounded-md bg-[#12151c] border border-cyan-500/30 text-[11px] font-mono text-cyan-300 shadow-inner">
-          <Navigation className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-          <span className="text-zinc-400 font-semibold hidden md:inline">ROBOT POSE:</span>
-          <span>X: {livePose.x >= 0 ? `+${livePose.x.toFixed(2)}` : livePose.x.toFixed(2)}m</span>
-          <span>Y: {livePose.y >= 0 ? `+${livePose.y.toFixed(2)}` : livePose.y.toFixed(2)}m</span>
-          <span>Z: {livePose.z.toFixed(2)}m</span>
-          <span className="text-zinc-600">|</span>
-          <span className="text-amber-400">{livePose.yawDeg.toFixed(0)}°</span>
-        </div>
-
-        {/* Right: Camera Presets & Palette Selector */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Palette Selector Pills */}
-          <div className="flex items-center gap-1 p-0.5 rounded-md bg-[#13161f] border border-[#232832]">
-            {PALETTES.map((p) => {
-              const active = colorMode === p.id;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setColorMode(p.id)}
-                  title={`${p.label} - ${p.desc}`}
-                  className={`px-2 py-1 rounded text-[10px] font-medium font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
-                    active
-                      ? "bg-white/15 text-white border border-white/25 shadow-sm"
-                      : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
-                  }`}
-                >
-                  <span className={`w-2 h-2 rounded-full bg-gradient-to-r ${p.preview}`} />
-                  <span className="hidden xl:inline">{p.label}</span>
-                </button>
-              );
-            })}
+        {/* Right: Unified Segmented View Controls & Actions */}
+        <div className="flex items-center gap-1.5">
+          {/* Segmented Camera Presets */}
+          <div className="flex items-center p-0.5 rounded-md bg-[#0D1117] border border-[#30363D]">
+            <button
+              onClick={resetCamera}
+              className={`px-2 py-1 rounded text-[10px] font-mono transition cursor-pointer ${
+                cameraPreset === "orbit"
+                  ? "bg-cyan-500/20 text-cyan-300 font-semibold"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              title="3D Isometric Overview"
+            >
+              3D
+            </button>
+            <button
+              onClick={setTopDownView}
+              className={`px-2 py-1 rounded text-[10px] font-mono transition cursor-pointer ${
+                cameraPreset === "topdown"
+                  ? "bg-cyan-500/20 text-cyan-300 font-semibold"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              title="2D Top-Down View"
+            >
+              Top
+            </button>
+            <button
+              onClick={focusOnRobot}
+              className={`px-2 py-1 rounded text-[10px] font-mono transition cursor-pointer flex items-center gap-1 ${
+                isFollowingRobot
+                  ? "bg-cyan-500/20 text-cyan-300 font-semibold"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              title="Follow Rover Marker"
+            >
+              <Crosshair className="w-2.5 h-2.5 text-cyan-400" />
+              <span>Follow</span>
+            </button>
           </div>
 
-          {/* Camera Preset: Follow Robot */}
-          <button
-            onClick={focusOnRobot}
-            className={`px-2.5 py-1.5 rounded-md border text-[11px] font-mono font-medium transition cursor-pointer flex items-center gap-1.5 ${
-              isFollowingRobot
-                ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-xs"
-                : "border-[#252b37] bg-[#141720] text-zinc-300 hover:text-white hover:border-zinc-500"
-            }`}
-            title="Lock camera to live robot position"
-          >
-            <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline">Follow</span>
-          </button>
+          <div className="h-3 w-px bg-slate-800" />
 
-          {/* Camera Preset: 2D Top-Down */}
-          <button
-            onClick={setTopDownView}
-            className={`p-1.5 rounded-md border text-zinc-300 hover:text-white transition cursor-pointer ${
-              cameraPreset === "topdown"
-                ? "bg-cyan-500/20 border-cyan-400 text-cyan-300"
-                : "border-[#252b37] bg-[#141720] hover:border-zinc-500"
-            }`}
-            title="Switch to Top-Down 2D Tactical Plan View"
-          >
-            <Compass className="w-4 h-4" />
-          </button>
-
-          {/* Reset Camera */}
-          <button
-            onClick={resetCamera}
-            className="p-1.5 rounded-md border border-[#252b37] bg-[#141720] text-zinc-300 hover:text-white hover:border-zinc-500 transition cursor-pointer"
-            title="Reset to 3D Isometric Overview"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-
-          {/* Point Size Adjuster */}
+          {/* Quick Point Size Cycle */}
           <button
             onClick={() => setPointSize((prev) => (prev <= 0.035 ? 0.12 : prev - 0.025))}
-            className="px-2 py-1.5 rounded-md border border-[#252b37] bg-[#141720] text-[10px] font-mono text-zinc-300 hover:text-white cursor-pointer"
+            className="px-2 py-1 rounded-md border border-[#30363D] bg-[#21262D] text-[10px] font-mono text-slate-300 hover:text-white cursor-pointer"
             title="Cycle Point Size"
           >
             {pointSize.toFixed(3)}m
           </button>
 
+          {/* Instant Sync */}
+          <button
+            onClick={handleCapturePcd}
+            disabled={isCapturingPcd}
+            className="p-1.5 rounded-md border border-[#30363D] bg-[#21262D] text-slate-300 hover:text-white hover:border-slate-500 transition cursor-pointer disabled:opacity-40"
+            title="Force immediate 30s cloud sync"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isCapturingPcd ? "animate-spin text-emerald-400" : ""}`} />
+          </button>
+
+          {/* Export PCD */}
+          <button
+            onClick={handleDownloadPcd}
+            className="p-1.5 rounded-md border border-[#30363D] bg-[#21262D] text-slate-300 hover:text-white hover:border-slate-500 transition cursor-pointer"
+            title="Download .pcd file"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+
           {/* Fullscreen */}
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 rounded-md border border-[#252b37] bg-[#141720] text-zinc-300 hover:text-white hover:border-zinc-500 transition cursor-pointer"
+            className="p-1.5 rounded-md border border-[#30363D] bg-[#21262D] text-slate-300 hover:text-white hover:border-slate-500 transition cursor-pointer"
             title={isFullscreen ? "Exit Fullscreen" : "Fullscreen 3D Viewer"}
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
 
-      {/* 2. Three.js Canvas Container */}
+      {/* 2. Top Edge Ambient Streaming Progress Bar */}
+      {isCapturingPcd && (
+        <div className="absolute top-[41px] left-0 right-0 h-[2px] bg-slate-800/80 z-20 overflow-hidden pointer-events-none">
+          <div
+            className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300 transition-all duration-1000 shadow-[0_0_8px_#34d399]"
+            style={{ width: `${((30 - captureSecondsLeft) / 30) * 100}%` }}
+          />
+        </div>
+      )}
+
+      {/* 3. Three.js Canvas Container */}
       <div
         ref={containerRef}
-        className={`relative w-full bg-[#07080a] ${
+        className={`relative w-full bg-[#0E1117] ${
           isFullscreen ? "flex-1 h-full" : "h-[340px] lg:h-[420px]"
         }`}
       />
 
-      {/* 3. Loading Overlay */}
-      {isLoading && (
-        <div className="absolute inset-0 z-30 bg-[#07080a]/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center space-y-4">
-          <div className="relative">
-            <div className="w-12 h-12 border-2 border-zinc-700 border-t-cyan-400 rounded-full animate-spin" />
-            <Box className="w-5 h-5 text-cyan-400 absolute inset-0 m-auto" />
-          </div>
-          <div className="space-y-1.5">
-            <h4 className="text-sm font-bold text-white tracking-wider uppercase font-mono">
-              Parsing 3D Point-LIO SLAM Map
-            </h4>
-            <p className="text-xs text-zinc-400 font-mono">
-              Decompressing 819,405 points from /map.pcd ({loadProgress}%)
-            </p>
-          </div>
-          <div className="w-56 h-1.5 bg-zinc-800 rounded-full overflow-hidden border border-zinc-700">
-            <div
-              className="h-full bg-gradient-to-r from-zinc-500 via-slate-300 to-white transition-all duration-300"
-              style={{ width: `${loadProgress}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 4. Left Elevation Scale Bar (Stealth Black & Gray Gradient) */}
-      {mapBounds && (
-        <div className="absolute top-16 left-3 z-10 hidden sm:flex flex-col items-center gap-1 pointer-events-none bg-[#0a0d13]/85 p-2 rounded-md border border-[#1f2530] backdrop-blur-xs">
-          <span className="text-[9px] font-mono text-zinc-400">
-            +{mapBounds.max[2].toFixed(1)}m
-          </span>
-          <div
-            className={`w-2.5 h-28 rounded-xs border border-white/20 shadow-inner ${
-              colorMode === "monochrome"
-                ? "bg-gradient-to-t from-zinc-900 via-slate-400 to-white"
-                : colorMode === "cyber_slate"
-                ? "bg-gradient-to-t from-slate-900 via-sky-600 to-cyan-300"
-                : colorMode === "tactical_amber"
-                ? "bg-gradient-to-t from-stone-900 via-amber-600 to-yellow-300"
-                : colorMode === "matrix_emerald"
-                ? "bg-gradient-to-t from-neutral-900 via-emerald-700 to-emerald-300"
-                : "bg-gradient-to-t from-blue-600 via-emerald-400 to-red-500"
-            }`}
-          />
-          <span className="text-[9px] font-mono text-zinc-400">
-            {mapBounds.min[2].toFixed(1)}m
-          </span>
-          <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-tighter mt-0.5">
-            Z-ELEV
-          </span>
-        </div>
-      )}
-
-      {/* 5. Top-Right Tactical Compass & Heading Tag */}
-      <div className="absolute top-16 right-3 z-10 pointer-events-none hidden md:flex items-center gap-2 bg-[#0a0d13]/85 px-2.5 py-1.5 rounded-md border border-[#1f2530] backdrop-blur-xs">
-        <Compass className="w-4 h-4 text-cyan-400" />
-        <div className="text-[10px] font-mono text-zinc-300 leading-tight">
-          <div>NORTH ALIGNED</div>
-          <div className="text-zinc-500 text-[9px]">Y+ GRID FORWARD</div>
-        </div>
+      {/* 4. Floating Robot Coordinates Badge (Top-Left, Clean Glass) */}
+      <div className="absolute top-13 left-3 z-10 pointer-events-none flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#161B22]/85 border border-[#30363D] text-[10px] font-mono text-slate-300 backdrop-blur-md shadow-sm">
+        <Navigation className="w-3 h-3 text-cyan-400 animate-pulse" />
+        <span>X: <strong className="text-white">{livePose.x >= 0 ? `+${livePose.x.toFixed(1)}` : livePose.x.toFixed(1)}m</strong></span>
+        <span>Y: <strong className="text-white">{livePose.y >= 0 ? `+${livePose.y.toFixed(1)}` : livePose.y.toFixed(1)}m</strong></span>
+        <span className="text-slate-600">|</span>
+        <span className="text-amber-400 font-semibold">{livePose.yawDeg.toFixed(0)}°</span>
       </div>
 
-      {/* 6. Bottom Tactical HUD Bar */}
-      <div className="absolute bottom-2.5 left-3 right-3 z-10 flex items-center justify-between gap-3 pointer-events-none flex-wrap">
-        {/* Left: Spatial Metrics Badges */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="px-2.5 py-1 rounded bg-[#0a0d13]/90 border border-[#1f2530] text-[10px] font-mono text-cyan-400 flex items-center gap-2 backdrop-blur-xs">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span>THREE.JS v0.180 • ORBIT ACTIVE</span>
-          </div>
+      {/* 5. Minimalist Elevation Scale Strip (Left) */}
+      {mapBounds && (
+        <div className="absolute top-22 left-3 z-10 hidden sm:flex flex-col items-center gap-1 pointer-events-none bg-[#161B22]/70 px-1 py-1.5 rounded border border-white/5 backdrop-blur-xs">
+          <span className="text-[8px] font-mono text-red-400 font-semibold">
+            +{mapBounds.max[2].toFixed(0)}
+          </span>
+          <div className="w-1 h-14 rounded-full bg-gradient-to-t from-blue-600 via-emerald-400 via-yellow-400 to-red-500 opacity-80" />
+          <span className="text-[8px] font-mono text-blue-400 font-semibold">
+            {mapBounds.min[2].toFixed(0)}
+          </span>
+        </div>
+      )}
 
-          {mapBounds && (
-            <div className="hidden lg:flex px-2.5 py-1 rounded bg-[#0a0d13]/90 border border-[#1f2530] text-[10px] font-mono text-zinc-300 backdrop-blur-xs">
-              <span className="text-zinc-500 mr-1.5">BOUNDS:</span>
-              <span>
-                {(mapBounds.max[0] - mapBounds.min[0]).toFixed(1)}m ×{" "}
-                {(mapBounds.max[1] - mapBounds.min[1]).toFixed(1)}m ×{" "}
-                {(mapBounds.max[2] - mapBounds.min[2]).toFixed(1)}m
-              </span>
-            </div>
-          )}
+      {/* 6. Dismissible Error Toast */}
+      {captureError && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-red-950/90 border border-red-500/60 rounded-md px-3 py-1.5 text-xs font-mono text-red-200 flex items-center gap-2.5 backdrop-blur-md shadow-xl max-w-md">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <span className="flex-1 truncate">{captureError}</span>
+          <button
+            onClick={() => setCaptureError(null)}
+            className="text-red-400 hover:text-white font-bold px-1 rounded cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
-          <div className="hidden xl:flex px-2.5 py-1 rounded bg-[#0a0d13]/90 border border-[#1f2530] text-[10px] font-mono text-zinc-400 backdrop-blur-xs">
-            THEME: <span className="text-zinc-200 font-semibold ml-1 capitalize">{colorMode.replace("_", " ")}</span>
+      {/* 7. Initial PCD Loading Spinner */}
+      {isLoading && (
+        <div className="absolute inset-0 z-30 bg-[#0E1117]/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center space-y-3">
+          <div className="w-9 h-9 border-2 border-slate-700 border-t-cyan-400 rounded-full animate-spin" />
+          <div className="space-y-1">
+            <h4 className="text-xs font-bold text-white tracking-wider uppercase font-mono">
+              Loading 3D Point-LIO Cloud
+            </h4>
+            <p className="text-[11px] text-slate-400 font-mono">
+              Unpacking {loadProgress}%...
+            </p>
           </div>
         </div>
+      )}
 
-        {/* Right: Controls Guide */}
-        <div className="text-[10px] font-mono text-zinc-400 bg-[#0a0d13]/90 px-3 py-1 rounded border border-[#1f2530] backdrop-blur-xs">
-          ROTATE: <span className="text-zinc-200">Drag</span> • PAN: <span className="text-zinc-200">Right-Click</span> • ZOOM: <span className="text-zinc-200">Scroll</span>
+      {/* 8. Bottom Minimalist Glass Status Bar */}
+      <div className="absolute bottom-2 left-3 right-3 z-10 pointer-events-none flex items-center justify-between text-[10px] font-mono text-slate-400 flex-wrap gap-2">
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-[#161B22]/85 border border-[#30363D] backdrop-blur-md shadow-xs">
+          <span className="text-cyan-400 font-semibold">{pointCount > 0 ? `${(pointCount / 1000).toFixed(0)}k points` : "Mapping"}</span>
+          {mapBounds && (
+            <>
+              <span className="text-slate-600">·</span>
+              <span>{(mapBounds.max[0] - mapBounds.min[0]).toFixed(0)}×{(mapBounds.max[1] - mapBounds.min[1]).toFixed(0)}m</span>
+            </>
+          )}
+          {lastCaptureInfo && (
+            <>
+              <span className="text-slate-600">·</span>
+              <span className="text-emerald-400">Synced {lastCaptureInfo.timestamp}</span>
+            </>
+          )}
+        </div>
+
+        <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#161B22]/85 border border-[#30363D] backdrop-blur-md shadow-xs text-slate-400">
+          <span>Rotate: Drag</span>
+          <span className="text-slate-600">·</span>
+          <span>Pan: Right-Click</span>
+          <span className="text-slate-600">·</span>
+          <span>Zoom: Scroll</span>
         </div>
       </div>
     </div>

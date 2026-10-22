@@ -1,3 +1,4 @@
+
 "use client";
 
 import React from "react";
@@ -7,6 +8,7 @@ import { RescueSensorWorkspace } from "../components/RescueSensorWorkspace";
 import { RobotControls } from "../components/RobotControls";
 import { RecentObservations } from "../components/RecentObservations";
 import { ActivityTimeline } from "../components/ActivityTimeline";
+import { TeleopController } from "../components/TeleopController";
 import { useDashboard } from "../lib/DashboardContext";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -70,6 +72,9 @@ export default function DashboardPage() {
         isUpstreamLive={isUpstreamLive}
         latestObservation={observations[0] || null}
       />
+
+      {/* Group 2.5: Manual Driving Teleoperation (Virtual 2D Joystick & Click-to-Focus Keyboard Drive Box) */}
+      <TeleopController onPoseUpdate={fetchStatusAndEvents} />
 
       {/* Group 3: Recent Observations and Actions (Short, Useful Secondary Section) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

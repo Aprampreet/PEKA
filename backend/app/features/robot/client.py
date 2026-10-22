@@ -482,5 +482,135 @@ class RobotApiClient:
             yield packet
             await asyncio.sleep(0.083)  # ~12 Hz
 
+    async def capture_pcd(self):
+        """
+        Proxies GET /api/lidar/capture.pcd to upstream robot bridge (30s capture).
+        Saves the captured PCD to frontend/public/map.pcd.
+        If upstream is unavailable, provides the fallback PCD from frontend/public/map.pcd.
+        """
+        from starlette.responses import Response
+        from fastapi import HTTPException
+        from pathlib import Path
+
+        upstream_url = settings.piper_robot_api_url.rstrip("/")
+        client = await self.get_client()
+        frontend_map_path = Path(__file__).resolve().parents[4] / "frontend" / "public" / "map.pcd"
+
+        try:
+            resp = await client.get(
+                f"{upstream_url}/api/lidar/capture.pcd",
+                timeout=httpx.Timeout(60.0, connect=2.0)
+            )
+            if resp.status_code == 200:
+                frame_id = resp.headers.get("X-PointCloud-Frame-Id", "camera_init")
+                content = resp.content
+
+                try:
+                    frontend_map_path.write_bytes(content)
+                except Exception:
+                    pass
+
+                event_logger.log(
+                    category="camera",
+                    level="success",
+                    message=f"Live 30s Point-LIO PCD captured ({len(content)//1024} KB, frame: {frame_id})."
+                )
+                return Response(
+                    content=content,
+                    media_type="application/vnd.pcd",
+                    headers={
+                        "Content-Disposition": 'attachment; filename="cloud_capture.pcd"',
+                        "X-PointCloud-Frame-Id": frame_id,
+                        "X-PointCloud-Source": "live",
+                    }
+                )
+            elif resp.status_code == 409:
+                raise HTTPException(status_code=409, detail="LiDAR capture already in progress. Please wait for it to finish.")
+            elif resp.status_code == 422:
+                detail = "Unprocessable LiDAR cloud entity from upstream."
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=422, detail=detail)
+        except HTTPException:
+            raise
+        except Exception as e:
+            event_logger.log(
+                category="camera",
+                level="info",
+                message=f"Upstream 30s PCD capture timed out/unavailable ({str(e)[:40]}). Serving cached map.",
+                is_simulated=True
+            )
+
+        # Fallback: serve local map.pcd
+        if frontend_map_path.exists():
+            content = frontend_map_path.read_bytes()
+            return Response(
+                content=content,
+                media_type="application/vnd.pcd",
+                headers={
+                    "Content-Disposition": 'attachment; filename="cloud_capture.pcd"',
+                    "X-PointCloud-Frame-Id": "camera_init",
+                    "X-PointCloud-Source": "cached",
+                }
+            )
+
+        raise HTTPException(status_code=503, detail="No usable PCD point cloud available")
+
+    async def send_cmd_vel(self, linear_x: float, angular_z: float) -> Dict[str, Any]:
+        """
+        Publishes velocity command to upstream ROS 2 topic /cmd_vel via POST /api/robot/cmd_vel.
+        Enforces teammate's exact ROS 2 validation range:
+        - linear_x: -0.5 to 0.5 (m/s)
+        - angular_z: -1.0 to 1.0 (rad/s)
+        Also updates local spatial pose in map adapter for smooth UI tracking.
+        """
+        # Strict clamping to ROS 2 limits
+        clamped_x = max(-0.5, min(0.5, float(linear_x)))
+        clamped_z = max(-1.0, min(1.0, float(angular_z)))
+
+        # Update local simulated pose so the robot marker actually drives on the UI map!
+        from app.features.map.adapter import map_adapter
+        map_adapter.update_teleop_pose(clamped_x, clamped_z, dt=0.15)
+
+        upstream_url = settings.piper_robot_api_url.rstrip("/")
+        client = await self.get_client()
+        upstream_success = False
+        upstream_msg = "Velocity command processed"
+
+        try:
+            resp = await client.post(
+                f"{upstream_url}/api/robot/cmd_vel",
+                json={
+                    "linear_x": round(clamped_x, 3),
+                    "angular_z": round(clamped_z, 3),
+                },
+                timeout=1.0
+            )
+            if resp.status_code == 200:
+                upstream_success = True
+                upstream_msg = resp.json().get("message", "Velocity command published to ROS 2")
+            else:
+                upstream_msg = f"HTTP {resp.status_code}"
+        except Exception as e:
+            upstream_msg = f"Upstream offline: {str(e)[:40]}"
+
+        return {
+            "success": upstream_success or settings.enable_simulation_fallback,
+            "topic": "/cmd_vel",
+            "linear_x": clamped_x,
+            "angular_z": clamped_z,
+            "message": upstream_msg,
+            "upstream_published": upstream_success,
+        }
+
+    async def send_teleop(self, linear_x: float, angular_z: float, command: str = "stop") -> Dict[str, Any]:
+        """Legacy compatibility wrapper for teleop endpoint."""
+        res = await self.send_cmd_vel(linear_x, angular_z)
+        res["command"] = command
+        return res
+
 
 robot_client = RobotApiClient()
+

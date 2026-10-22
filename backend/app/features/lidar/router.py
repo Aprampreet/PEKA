@@ -14,6 +14,16 @@ async def get_lidar_status():
     return await robot_client.get_lidar_status()
 
 
+@router.get("/api/lidar/capture.pcd")
+async def capture_pcd():
+    """
+    Starts a 30-second capture of incoming ROS 2 sensor_msgs/msg/PointCloud2 messages
+    and returns the combined XYZ coordinates as a downloadable binary PCD file.
+    Proxies to upstream robot GET /api/lidar/capture.pcd.
+    """
+    return await robot_client.capture_pcd()
+
+
 @router.websocket("/api/lidar/ws")
 @router.websocket("/ws/lidar")
 async def websocket_lidar_stream(websocket: WebSocket):
