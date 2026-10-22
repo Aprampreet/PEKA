@@ -9,6 +9,11 @@ import {
   ObservationRecord,
   IncidentRecord,
   PersonRecord,
+  EmergencyIncident,
+  SOSRequestPayload,
+  SOSResponsePayload,
+  LocationPreference,
+  ReverseGeocodeResult,
 } from "./types";
 
 const BACKEND_URL =
@@ -311,6 +316,118 @@ class PiperApiClient {
       return res.ok;
     } catch {
       return false;
+    }
+  }
+
+  async createSOSIncident(payload: SOSRequestPayload): Promise<SOSResponsePayload> {
+    const res = await fetch(`${this.baseUrl}/api/emergency/sos`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let errDetail = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        if (errJson.detail) errDetail = errJson.detail;
+      } catch {}
+      throw new Error(errDetail);
+    }
+    return await res.json();
+  }
+
+  async getEmergencyIncidents(status?: string, userId?: string): Promise<EmergencyIncident[]> {
+    try {
+      const params = new URLSearchParams();
+      if (status) params.append("status", status);
+      if (userId) params.append("user_id", userId);
+      const url = `${this.baseUrl}/api/emergency/incidents?${params.toString()}`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch {
+      return [];
+    }
+  }
+
+  async getEmergencyIncident(incidentId: string): Promise<EmergencyIncident | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/emergency/incidents/${incidentId}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async updateEmergencyStatus(
+    incidentId: string,
+    status: string,
+    notes?: string,
+    role: string = "operator"
+  ): Promise<EmergencyIncident | null> {
+    const res = await fetch(`${this.baseUrl}/api/emergency/incidents/${incidentId}/status`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Role": role,
+      },
+      body: JSON.stringify({ status, notes }),
+    });
+    if (!res.ok) {
+      let errDetail = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        if (errJson.detail) errDetail = errJson.detail;
+      } catch {}
+      throw new Error(errDetail);
+    }
+    return await res.json();
+  }
+
+  async getLocationPreference(userId: string = "operator-default"): Promise<LocationPreference | null> {
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/api/emergency/location-preference?user_id=${encodeURIComponent(userId)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async saveLocationPreference(
+    enabled: boolean,
+    userId: string = "operator-default"
+  ): Promise<LocationPreference | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/emergency/location-preference`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, locationSharingEnabled: enabled }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async reverseGeocode(lat: number, lon: number): Promise<ReverseGeocodeResult | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/emergency/reverse-geocode?lat=${lat}&lon=${lon}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
     }
   }
 }

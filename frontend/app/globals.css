@@ -40,3 +40,51 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #B6B8AE;
 }
+
+/* Leaflet Custom Tactical Dark Popup and Controls */
+.leaflet-popup-content-wrapper {
+  background: #0F172A !important;
+  color: #F8FAFC !important;
+  border: 1px solid rgba(239, 68, 68, 0.45) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.8), 0 0 20px rgba(220, 38, 38, 0.25) !important;
+  padding: 2px !important;
+}
+
+.leaflet-popup-tip {
+  background: #0F172A !important;
+  border: 1px solid rgba(239, 68, 68, 0.45) !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  color: #94A3B8 !important;
+  padding: 8px 8px 0 0 !important;
+  font-size: 16px !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+  color: #EF4444 !important;
+}
+
+.leaflet-bar {
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.leaflet-bar a {
+  background-color: #0F172A !important;
+  color: #F1F5F9 !important;
+  border-bottom: 1px solid #1E293B !important;
+}
+
+.leaflet-bar a:hover {
+  background-color: #1E293B !important;
+  color: #EF4444 !important;
+}
+
+.leaflet-container {
+  font-family: inherit !important;
+}
+

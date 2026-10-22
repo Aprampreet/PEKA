@@ -9,6 +9,8 @@ import { RecentObservations } from "../components/RecentObservations";
 import { ActivityTimeline } from "../components/ActivityTimeline";
 import { useDashboard } from "../lib/DashboardContext";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AlertOctagon, ArrowRight } from "lucide-react";
 
 export default function DashboardPage() {
   const {
@@ -29,6 +31,33 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
+      {/* Emergency Response Quick Beacon Access Banner */}
+      <div className="rounded-lg border border-red-500/30 bg-gradient-to-r from-[#111827] via-[#1E293B] to-[#111827] p-3 sm:p-4 text-white flex flex-wrap items-center justify-between gap-3 shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-red-600/20 border border-red-500/50 flex items-center justify-center shrink-0">
+            <AlertOctagon className="w-4 h-4 text-red-500 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold tracking-tight text-white">Emergency SOS Response Beacon</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-red-950 text-red-300 border border-red-800">
+                DISASTER READY
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-300">
+              OpenStreetMap coordinate capture &amp; persistent emergency incident storage
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/sos"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#DC2626] hover:bg-red-700 text-white text-xs font-bold shadow-md transition cursor-pointer"
+        >
+          <span>Open SOS Beacon</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </Link>
+      </div>
+
       {/* Group 1: Robot and Connection Status (Operational Summary) */}
       <OperationalSummary
         info={robotInfo}

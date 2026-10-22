@@ -11,6 +11,7 @@ import {
   History,
   Activity,
   Settings,
+  AlertOctagon,
 } from "lucide-react";
 import { RobotInfo, RobotStatus } from "../lib/types";
 
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems = [
     { id: "overview", label: "Overview", icon: LayoutDashboard, href: "/" },
+    { id: "sos", label: "Emergency SOS", icon: AlertOctagon, href: "/sos", isEmergency: true },
     { id: "live_ops", label: "Live Operations", icon: Radio, href: "/live-ops" },
     { id: "map", label: "Mission Map", icon: MapIcon, href: "/map" },
     { id: "observations", label: "Observations", icon: Crosshair, href: "/observations" },
@@ -68,22 +70,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ? pathname === "/" || pathname === "/overview"
                 : pathname.startsWith(item.href);
 
+            const isEmergency = "isEmergency" in item && item.isEmergency;
+            const styleClasses = isEmergency
+              ? isActive
+                ? "bg-[#DC2626] text-white font-bold shadow-xs border border-red-700"
+                : "text-[#DC2626] hover:bg-red-50 hover:text-red-700 font-semibold border border-red-200/60 bg-red-50/40"
+              : isActive
+              ? "bg-[#FFFFFF] text-[#285B49] font-medium shadow-xs border border-[#D8D9D1]"
+              : "text-[#6C7068] hover:text-[#242820] hover:bg-[#F3F2ED] border border-transparent";
+
             return (
               <Link
                 key={item.id}
                 href={item.href}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs transition-colors ${
-                  isActive
-                    ? "bg-[#FFFFFF] text-[#285B49] font-medium shadow-xs border border-[#D8D9D1]"
-                    : "text-[#6C7068] hover:text-[#242820] hover:bg-[#F3F2ED] border border-transparent"
-                }`}
+                className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-md text-xs transition-colors ${styleClasses}`}
               >
-                <Icon
-                  className={`w-4 h-4 shrink-0 ${
-                    isActive ? "text-[#285B49]" : "text-[#6C7068]"
-                  }`}
-                />
-                <span>{item.label}</span>
+                <div className="flex items-center gap-2.5 truncate">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      isEmergency
+                        ? isActive
+                          ? "text-white"
+                          : "text-[#DC2626]"
+                        : isActive
+                        ? "text-[#285B49]"
+                        : "text-[#6C7068]"
+                    }`}
+                  />
+                  <span className="truncate">{item.label}</span>
+                </div>
+                {isEmergency && (
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      isActive ? "bg-white" : "bg-[#DC2626] animate-pulse"
+                    }`}
+                  />
+                )}
               </Link>
             );
           })}

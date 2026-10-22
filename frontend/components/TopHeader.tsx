@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, AlertOctagon } from "lucide-react";
+import Link from "next/link";
 import { useDashboard } from "../lib/DashboardContext";
 
 interface TopHeaderProps {
@@ -32,6 +33,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   // Derive title from current path
   const getPageMeta = () => {
+    if (pathname === "/sos") {
+      return {
+        title: "Emergency Response & SOS",
+        subtitle: "Production emergency incident beacon with OpenStreetMap and verified coordinates",
+      };
+    }
     if (pathname === "/live-ops") {
       return {
         title: "Live Operations",
@@ -120,6 +127,19 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-[#285B49]" : ""}`}
             />
           </button>
+        )}
+
+        {/* Quick Emergency SOS Action */}
+        {pathname !== "/sos" && (
+          <Link
+            href="/sos"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#DC2626] hover:bg-red-700 text-white text-xs font-bold transition shadow-xs cursor-pointer focus-visible:ring-2 focus-visible:ring-red-400"
+            title="Open Emergency SOS Interface"
+            aria-label="Emergency SOS Beacon"
+          >
+            <AlertOctagon className="w-3.5 h-3.5 animate-pulse text-white" />
+            <span className="tracking-wide">SOS BEACON</span>
+          </Link>
         )}
 
         {/* User / Operator Menu */}

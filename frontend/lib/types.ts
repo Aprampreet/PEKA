@@ -153,3 +153,88 @@ export interface ActivityEvent {
   is_simulated: boolean;
   obs_code?: string;
 }
+
+export type EmergencyIncidentStatus =
+  | "pending"
+  | "active"
+  | "acknowledged"
+  | "resolved"
+  | "cancelled";
+
+export type LocationReadinessState =
+  | "prompt"
+  | "locating"
+  | "ready"
+  | "denied"
+  | "unavailable"
+  | "timeout";
+
+export interface EmergencyIncident {
+  id: string;
+  user_id?: string;
+  idempotency_key: string;
+  status: EmergencyIncidentStatus;
+  latitude: number;
+  longitude: number;
+  location_accuracy_meters: number;
+  location_captured_at: string;
+  location_source: string;
+  address?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string;
+  events?: EmergencyIncidentEvent[];
+}
+
+export interface EmergencyIncidentEvent {
+  id: string;
+  incident_id: string;
+  actor_user_id?: string;
+  event_type: string;
+  metadata?: Record<string, any>;
+  created_at: string;
+}
+
+export interface SOSRequestPayload {
+  idempotencyKey: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  locationCapturedAt: string;
+  locationSource?: string;
+  description?: string;
+  isTestMode?: boolean;
+}
+
+export interface SOSResponsePayload {
+  success: boolean;
+  incident: {
+    id: string;
+    status: EmergencyIncidentStatus;
+    latitude: number;
+    longitude: number;
+    locationAccuracyMeters: number;
+    createdAt: string;
+    address?: string;
+    description?: string;
+  };
+  message?: string;
+}
+
+export interface LocationPreference {
+  userId: string;
+  locationSharingEnabled: boolean;
+  consentRecordedAt: string;
+  updatedAt: string;
+}
+
+export interface ReverseGeocodeResult {
+  address: string;
+  display_name: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postcode?: string;
+  source: string;
+}

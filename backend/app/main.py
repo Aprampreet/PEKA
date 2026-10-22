@@ -25,6 +25,7 @@ from app.features.recognition.router import router as recognition_router
 from app.features.observations.router import router as observations_router
 from app.features.registry.router import router as registry_router
 from app.features.events.router import router as events_router
+from app.features.emergency.router import router as emergency_router
 
 
 @asynccontextmanager
@@ -84,3 +85,4 @@ app.include_router(recognition_router)
 app.include_router(observations_router)
 app.include_router(registry_router)
 app.include_router(events_router)
+app.include_router(emergency_router)

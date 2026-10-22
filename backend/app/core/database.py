@@ -15,6 +15,7 @@ def get_db_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=30000;")
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
@@ -86,6 +87,57 @@ def init_database():
         details TEXT
     );
     """)
+
+    # 5. User Location Preferences Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_location_preferences (
+        user_id TEXT PRIMARY KEY,
+        location_sharing_enabled INTEGER NOT NULL DEFAULT 1,
+        consent_recorded_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """)
+
+    # 6. Emergency Incidents Table (SOS Events with Geolocation)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS emergency_incidents (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        idempotency_key TEXT UNIQUE NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'active', 'acknowledged', 'resolved', 'cancelled')) DEFAULT 'pending',
+        latitude REAL NOT NULL CHECK(latitude >= -90.0 AND latitude <= 90.0),
+        longitude REAL NOT NULL CHECK(longitude >= -180.0 AND longitude <= 180.0),
+        location_accuracy_meters REAL NOT NULL CHECK(location_accuracy_meters >= 0.0),
+        location_captured_at TEXT NOT NULL,
+        location_source TEXT NOT NULL,
+        address TEXT,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        resolved_at TEXT
+    );
+    """)
+
+    # 7. Emergency Incident Events Table (Auditable Status Transitions & Actions)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS emergency_incident_events (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        actor_user_id TEXT,
+        event_type TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (incident_id) REFERENCES emergency_incidents(id) ON DELETE CASCADE
+    );
+    """)
+
+    # Indexes for performant lookups and geospatial queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emergency_incidents_user_id ON emergency_incidents(user_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emergency_incidents_status ON emergency_incidents(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emergency_incidents_created_at ON emergency_incidents(created_at);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emergency_incidents_lat_lon ON emergency_incidents(latitude, longitude);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emergency_incidents_idempotency ON emergency_incidents(idempotency_key);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emergency_incident_events_incident_id ON emergency_incident_events(incident_id);")
 
     conn.commit()
     conn.close()
