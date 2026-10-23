@@ -110,9 +110,11 @@ export const MissionMap: React.FC<MissionMapProps> = ({
 
     // 3. Render Occupancy Grid Map
     const grid = mapData?.grid;
-    const cellSize = 10;
     const gridRows = grid?.length || 50;
     const gridCols = grid?.[0]?.length || 50;
+    const targetMapPx = Math.min(width, height) * 0.72;
+    const maxDim = Math.max(gridCols, gridRows, 20);
+    const cellSize = Math.max(2, Math.min(24, Math.floor(targetMapPx / maxDim)));
     const mapOriginX = -(gridCols * cellSize) / 2;
     const mapOriginY = -(gridRows * cellSize) / 2;
 
@@ -121,15 +123,20 @@ export const MissionMap: React.FC<MissionMapProps> = ({
         for (let c = 0; c < gridCols; c++) {
           const val = grid[r][c];
           const cellX = mapOriginX + c * cellSize;
-          const cellY = mapOriginY + r * cellSize;
+          const cellY = mapOriginY + (gridRows - 1 - r) * cellSize;
 
-          if (val === 100) {
-            // Obstacle / Wall: Dark slate block
+          if (val >= 100) {
+            // Definite Obstacle / Rubble / Wall: Dark slate block
             ctx.fillStyle = "#2a2e28";
             ctx.fillRect(cellX, cellY, cellSize, cellSize);
             ctx.strokeStyle = "rgba(20, 24, 19, 0.9)";
             ctx.lineWidth = 0.5;
             ctx.strokeRect(cellX, cellY, cellSize, cellSize);
+          } else if (val > 0) {
+            // Obstacle probability gradient (1-99)
+            const alpha = Math.min(0.85, 0.25 + (val / 100) * 0.6);
+            ctx.fillStyle = `rgba(183, 121, 39, ${alpha})`;
+            ctx.fillRect(cellX, cellY, cellSize, cellSize);
           } else if (val === 0) {
             // Explored Navigable Area
             ctx.fillStyle = "#3f463c";
@@ -188,8 +195,17 @@ export const MissionMap: React.FC<MissionMapProps> = ({
     }
 
     // 6. Layer 5: Sensor Coverage (Directional FOV from Robot)
-    const robotX = (mapData?.simulated_robot_pose?.x || 0) * 80;
-    const robotY = -(mapData?.simulated_robot_pose?.y || 0) * 80;
+    const resolution = mapData?.metadata?.resolution || 0.05;
+    const originX = mapData?.metadata?.origin_x || 0.0;
+    const originY = mapData?.metadata?.origin_y || 0.0;
+    const rawRobotX = mapData?.simulated_robot_pose?.x || 0;
+    const rawRobotY = mapData?.simulated_robot_pose?.y || 0;
+
+    // Convert metric robot coordinates into canvas pixel space
+    const robotCellX = (rawRobotX - originX) / resolution;
+    const robotCellY = (rawRobotY - originY) / resolution;
+    const robotX = mapOriginX + robotCellX * cellSize;
+    const robotY = mapOriginY + (gridRows - 1 - robotCellY) * cellSize;
     const robotYawDeg = mapData?.simulated_robot_pose?.yaw_deg || 45;
     const robotYawRad = (robotYawDeg * Math.PI) / 180;
 
@@ -385,8 +401,14 @@ export const MissionMap: React.FC<MissionMapProps> = ({
           <span className="text-[11px] text-[#70746D] font-normal">
             Local Occupancy Grid
           </span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#ECEBE5] text-[#70746D] border border-[#DCDDD5] font-semibold ml-1">
-            DEMO DATA
+          <span
+            className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ml-1 ${
+              mapData?.status_badge?.includes("LIVE")
+                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                : "bg-[#ECEBE5] text-[#70746D] border-[#DCDDD5]"
+            }`}
+          >
+            {mapData?.status_badge || "AWAITING /map"}
           </span>
         </div>
 

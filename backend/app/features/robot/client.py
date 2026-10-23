@@ -556,7 +556,43 @@ class RobotApiClient:
                 }
             )
 
-        raise HTTPException(status_code=503, detail="No usable PCD point cloud available")
+    async def get_occupancy_grid(self) -> Optional[Dict[str, Any]]:
+        """
+        Fetches the latest 2D occupancy grid from RTAB-Map's ROS 2 /map topic
+        via upstream GET /api/map/occupancy-grid.
+        Returns None if upstream is unavailable or reports 503 (no map yet).
+        """
+        upstream_url = settings.piper_robot_api_url.rstrip("/")
+        try:
+            client = await self.get_client()
+            resp = await client.get(
+                f"{upstream_url}/api/map/occupancy-grid",
+                timeout=httpx.Timeout(3.0, connect=1.5)
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                    return data
+        except Exception:
+            pass
+        return None
+
+    async def get_robot_position(self) -> Optional[Dict[str, Any]]:
+        """
+        Fetches latest robot position from upstream GET /api/robot/current-position.
+        """
+        upstream_url = settings.piper_robot_api_url.rstrip("/")
+        try:
+            client = await self.get_client()
+            resp = await client.get(
+                f"{upstream_url}/api/robot/current-position",
+                timeout=httpx.Timeout(1.5, connect=1.0)
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:
+            pass
+        return None
 
     async def send_cmd_vel(self, linear_x: float, angular_z: float) -> Dict[str, Any]:
         """

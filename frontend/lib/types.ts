@@ -110,14 +110,7 @@ export interface MapData {
   metadata: MapMetadata;
   grid: number[][];
   simulated_robot_pose: SimulatedRobotPose;
-  contract_docs: {
-    target_ros2_message: string;
-    recommended_topic: string;
-    target_pose_source: string;
-    coordinate_frame: string;
-    occupancy_semantics: Record<string, string>;
-    status_note: string;
-  };
+  contract_docs?: Record<string, any>;
 }
 
 export interface RecognitionCandidate {

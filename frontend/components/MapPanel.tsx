@@ -45,7 +45,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     const rows = grid.length;
     const cols = grid[0]?.length || 0;
     const resolution = mapData.metadata.resolution; // 0.05 m/cell
-    const cellSize = (width * 0.75) / cols;
+    const cellSize = (width * 0.75) / Math.max(cols, rows, 1);
 
     const startX = -((cols * cellSize) / 2);
     const startY = -((rows * cellSize) / 2);
@@ -55,14 +55,19 @@ export const MapPanel: React.FC<MapPanelProps> = ({
       for (let c = 0; c < cols; c++) {
         const val = grid[r][c];
         const cellX = startX + c * cellSize;
-        const cellY = startY + r * cellSize;
+        const cellY = startY + (rows - 1 - r) * cellSize;
 
-        if (val === 100) {
+        if (val >= 100) {
           // Occupied / Obstacle / Rubble
           ctx.fillStyle = "rgba(245, 158, 11, 0.85)"; // Amber obstacle
           ctx.fillRect(cellX, cellY, cellSize, cellSize);
           ctx.strokeStyle = "rgba(180, 83, 9, 0.6)";
           ctx.strokeRect(cellX, cellY, cellSize, cellSize);
+        } else if (val > 0) {
+          // Obstacle probability (1-99)
+          const alpha = 0.2 + (val / 100) * 0.65;
+          ctx.fillStyle = `rgba(245, 158, 11, ${alpha})`;
+          ctx.fillRect(cellX, cellY, cellSize, cellSize);
         } else if (val === 0) {
           // Free navigable floor
           ctx.fillStyle = "rgba(15, 23, 42, 0.9)";

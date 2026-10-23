@@ -129,10 +129,11 @@ export const MissionMapView: React.FC<MissionMapViewProps> = ({
             Robot Staging Pose
           </span>
           <div className="text-xl font-semibold text-[#242820] font-mono">
-            X: 0.0m Y: 0.0m
+            X: {mapData?.simulated_robot_pose?.x !== undefined ? `${mapData.simulated_robot_pose.x >= 0 ? "+" : ""}${mapData.simulated_robot_pose.x.toFixed(1)}m` : "0.0m"}{" "}
+            Y: {mapData?.simulated_robot_pose?.y !== undefined ? `${mapData.simulated_robot_pose.y >= 0 ? "+" : ""}${mapData.simulated_robot_pose.y.toFixed(1)}m` : "0.0m"}
           </div>
-          <p className="text-[11px] text-[#6C7068] font-medium">
-            Orientation: Heading 45° NE
+          <p className="text-[11px] text-[#285B49] font-medium">
+            Orientation: Heading {mapData?.simulated_robot_pose?.yaw_deg !== undefined ? `${mapData.simulated_robot_pose.yaw_deg.toFixed(0)}°` : "45°"}
           </p>
         </div>
       </div>

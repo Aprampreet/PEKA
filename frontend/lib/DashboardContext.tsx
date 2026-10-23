@@ -44,16 +44,20 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Poll real-time status, observations, and activity feed
   const fetchStatusAndEvents = useCallback(async () => {
     try {
-      const [info, status, events, obsList] = await Promise.all([
+      const [info, status, events, obsList, map] = await Promise.all([
         api.getRobotInfo(),
         api.getRobotStatus(),
         api.getActivityEvents(50),
         api.getObservations(),
+        api.getMapData(),
       ]);
       setRobotInfo(info);
       setRobotStatus(status);
       setActivityEvents(events);
       setObservations(obsList);
+      if (map) {
+        setMapData(map);
+      }
     } catch (e) {
       console.error("Status polling error:", e);
     }
