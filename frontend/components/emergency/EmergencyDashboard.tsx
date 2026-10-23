@@ -251,12 +251,12 @@ export const EmergencyDashboard: React.FC = () => {
   };
 
   // 4. Geolocation Acquisition
-  const requestPosition = (isUserInitiated: boolean = true): Promise<GeolocationPosition> => {
-    return new Promise((resolve, reject) => {
-      if (!("geolocation" in navigator)) {
+  const requestPosition = (isUserInitiated: boolean = true): Promise<GeolocationPosition | null> => {
+    return new Promise((resolve) => {
+      if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
         setReadinessState("unavailable");
         setLocationErrorMessage("Geolocation is not supported by your browser or device.");
-        reject(new Error("Geolocation unsupported"));
+        resolve(null);
         return;
       }
 
@@ -304,7 +304,7 @@ export const EmergencyDashboard: React.FC = () => {
           }
           setLocationErrorMessage(userMsg);
           setAriaAnnouncement(`Location acquisition error: ${userMsg}`);
-          reject(new Error(userMsg));
+          resolve(null);
         },
         {
           enableHighAccuracy: true,
@@ -381,12 +381,16 @@ export const EmergencyDashboard: React.FC = () => {
 
     try {
       const freshPos = await requestPosition(false);
-      freshCoords = {
-        latitude: freshPos.coords.latitude,
-        longitude: freshPos.coords.longitude,
-        accuracy: freshPos.coords.accuracy,
-        timestamp: freshPos.timestamp || Date.now(),
-      };
+      if (freshPos && freshPos.coords) {
+        freshCoords = {
+          latitude: freshPos.coords.latitude,
+          longitude: freshPos.coords.longitude,
+          accuracy: freshPos.coords.accuracy,
+          timestamp: freshPos.timestamp || Date.now(),
+        };
+      } else {
+        throw new Error("No fresh position");
+      }
     } catch {
       if (lastKnownCoordinates) {
         freshCoords = lastKnownCoordinates;

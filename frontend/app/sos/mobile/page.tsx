@@ -50,10 +50,12 @@ export default function MobileSOSPage() {
     longitude: number;
     accuracy: number;
     timestamp: number;
-  }> => {
-    return new Promise((resolve, reject) => {
-      if (!("geolocation" in navigator)) {
-        reject(new Error("Geolocation unsupported on this device."));
+  } | null> => {
+    return new Promise((resolve) => {
+      if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+        setStatus("error");
+        setErrorMsg("Geolocation is not supported on this device.");
+        resolve(null);
         return;
       }
       setStatus("acquiring");
@@ -73,7 +75,7 @@ export default function MobileSOSPage() {
         (err) => {
           setStatus("error");
           setErrorMsg(err.message || "Failed to acquire device GPS.");
-          reject(err);
+          resolve(null);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
