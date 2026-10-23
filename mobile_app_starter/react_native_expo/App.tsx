@@ -19,8 +19,8 @@ import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import * as Battery from 'expo-battery';
 
-// ⚙️ Default Backend URL (Automatically set to your machine's active Wi-Fi IP)
-const DEFAULT_BACKEND_URL = 'http://172.20.10.3:8000';
+// ⚙️ Default Backend URL (Matches your laptop's active IP on the network)
+const DEFAULT_BACKEND_URL = 'http://172.20.10.6:8000';
 
 export default function App() {
   const [coords, setCoords] = useState<{
