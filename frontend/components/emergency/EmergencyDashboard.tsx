@@ -201,28 +201,36 @@ export const EmergencyDashboard: React.FC = () => {
         .then((perm) => {
           if (perm.state === "granted") {
             setReadinessState("ready");
+            setLocationErrorMessage(null);
             requestPosition(false).catch(() => {});
           } else if (perm.state === "denied") {
             setReadinessState("denied");
-            setLocationErrorMessage("Location permission is currently blocked in your browser settings.");
+            setLocationErrorMessage("Location permission is currently blocked in your browser settings. Please allow location access to enable live GPS.");
           } else {
             setReadinessState("prompt");
+            requestPosition(true).catch(() => {});
           }
 
           perm.onchange = () => {
             if (perm.state === "granted") {
               setReadinessState("ready");
+              setLocationErrorMessage(null);
               requestPosition(false).catch(() => {});
             } else if (perm.state === "denied") {
               setReadinessState("denied");
+              setLocationErrorMessage("Location permission is currently blocked in your browser settings. Please allow location access to enable live GPS.");
             } else {
               setReadinessState("prompt");
+              requestPosition(true).catch(() => {});
             }
           };
         })
         .catch(() => {
           setReadinessState("prompt");
+          requestPosition(true).catch(() => {});
         });
+    } else {
+      requestPosition(true).catch(() => {});
     }
 
     return () => {
@@ -248,6 +256,38 @@ export const EmergencyDashboard: React.FC = () => {
       watchIdRef.current = null;
     }
     setIsContinuousWatch(false);
+  };
+
+  const handleRecheckPermission = async () => {
+    setLocationErrorMessage(null);
+    setIsLocating(true);
+    setReadinessState("locating");
+    setAriaAnnouncement("Checking location permissions and acquiring GPS fix...");
+
+    if (typeof navigator !== "undefined" && navigator.permissions) {
+      try {
+        const perm = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+        if (perm.state === "granted") {
+          setReadinessState("ready");
+          setLocationErrorMessage(null);
+          await requestPosition(true);
+          return;
+        } else if (perm.state === "prompt") {
+          setReadinessState("prompt");
+          await requestPosition(true);
+          return;
+        } else if (perm.state === "denied") {
+          setIsLocating(false);
+          setReadinessState("denied");
+          setLocationErrorMessage(
+            "Location is still blocked in your browser settings. Follow the 2 steps below to allow access, then click Re-check."
+          );
+          return;
+        }
+      } catch {}
+    }
+
+    await requestPosition(true);
   };
 
   // 4. Geolocation Acquisition
@@ -790,7 +830,7 @@ export const EmergencyDashboard: React.FC = () => {
             <div className="flex flex-wrap items-center gap-3 shrink-0">
               <button
                 type="button"
-                onClick={() => requestPosition(true)}
+                onClick={handleRecheckPermission}
                 disabled={isLocating}
                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium text-xs shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-red-400"
               >
@@ -802,7 +842,7 @@ export const EmergencyDashboard: React.FC = () => {
                 ) : (
                   <>
                     <MapPin className="w-3.5 h-3.5" />
-                    <span>Enable Location Access</span>
+                    <span>{readinessState === "denied" ? "Re-check Permission" : "Enable Location Access"}</span>
                   </>
                 )}
               </button>
@@ -922,10 +962,10 @@ export const EmergencyDashboard: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => requestPosition(true)}
+                  onClick={handleRecheckPermission}
                   disabled={isLocating}
                   className="p-1 text-gray-400 hover:text-white transition disabled:opacity-50 cursor-pointer"
-                  title="Retry acquiring GPS fix"
+                  title="Check permissions and refresh GPS fix"
                   aria-label="Refresh GPS position"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isLocating ? "animate-spin text-red-400" : ""}`} />
@@ -935,20 +975,49 @@ export const EmergencyDashboard: React.FC = () => {
 
             {/* Error Message if Denied or Failed */}
             {locationErrorMessage && (
-              <div className="p-2.5 rounded-lg bg-red-950/50 border border-red-800 text-[11px] text-red-200 flex items-start gap-2 text-left">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <span>{locationErrorMessage}</span>
-                  {readinessState === "denied" && (
-                    <button
-                      type="button"
-                      onClick={() => setShowPermissionHelp(true)}
-                      className="block mt-1 text-red-300 underline font-medium hover:text-white cursor-pointer"
-                    >
-                      View instructions to enable
-                    </button>
-                  )}
+              <div className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-[11px] text-red-200 flex flex-col gap-2 text-left">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <span className="font-medium text-red-100">{locationErrorMessage}</span>
+                  </div>
                 </div>
+
+                {readinessState === "denied" && (
+                  <div className="mt-1 pt-2 border-t border-red-900/60 space-y-2 text-xs">
+                    <p className="text-gray-300 font-semibold flex items-center gap-1.5">
+                      <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                      <span>How to enable location in your browser:</span>
+                    </p>
+                    <div className="space-y-1.5 text-gray-300 pl-1 text-[11px] leading-relaxed">
+                      <p>
+                        <strong className="text-white">1. Address Bar:</strong> Click the{" "}
+                        <span className="px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700 text-amber-300 font-mono">🔒</span> or{" "}
+                        <span className="px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700 text-amber-300 font-mono">tune ⚙️</span>{" "}
+                        icon on the left of <code className="text-white font-mono">localhost:3000</code>.
+                      </p>
+                      <p>
+                        <strong className="text-white">2. Change Setting:</strong> Set <em>Location</em> from{" "}
+                        <span className="text-red-400 font-semibold">Block</span> to{" "}
+                        <span className="text-emerald-400 font-semibold">Allow</span> (or click <em>Reset permission</em>).
+                      </p>
+                      <p>
+                        <strong className="text-white">3. Safari (macOS):</strong> Go to <em>Safari &gt; Settings &gt; Websites &gt; Location</em> &gt; set <code className="text-white">localhost</code> to <em>Allow</em>.
+                      </p>
+                    </div>
+
+                    <div className="pt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRecheckPermission}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isLocating ? "animate-spin" : ""}`} />
+                        <span>I've allowed it — Re-check</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
