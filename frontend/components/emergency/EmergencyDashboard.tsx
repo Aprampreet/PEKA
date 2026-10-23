@@ -201,7 +201,7 @@ export const EmergencyDashboard: React.FC = () => {
         .then((perm) => {
           if (perm.state === "granted") {
             setReadinessState("ready");
-            requestPosition(false);
+            requestPosition(false).catch(() => {});
           } else if (perm.state === "denied") {
             setReadinessState("denied");
             setLocationErrorMessage("Location permission is currently blocked in your browser settings.");
@@ -212,7 +212,7 @@ export const EmergencyDashboard: React.FC = () => {
           perm.onchange = () => {
             if (perm.state === "granted") {
               setReadinessState("ready");
-              requestPosition(false);
+              requestPosition(false).catch(() => {});
             } else if (perm.state === "denied") {
               setReadinessState("denied");
             } else {
@@ -304,7 +304,7 @@ export const EmergencyDashboard: React.FC = () => {
           }
           setLocationErrorMessage(userMsg);
           setAriaAnnouncement(`Location acquisition error: ${userMsg}`);
-          reject(err);
+          reject(new Error(userMsg));
         },
         {
           enableHighAccuracy: true,
