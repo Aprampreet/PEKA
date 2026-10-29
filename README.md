@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🐾 PIPER — Rescue Intelligence System
+# 🐾 P.E.K.A — Rescue Intelligence System
 ### Autonomous Urban Search & Rescue (US&R) Quadruped & Tactical Command Platform
 
 [![Award](https://img.shields.io/badge/%F0%9F%A5%88_Award-2nd_Place_Winner-silver?style=for-the-badge)](#)
@@ -30,7 +30,7 @@
 
 In catastrophic urban disasters (earthquakes, structural collapses, mine entrapments, and hazardous industrial leaks), structural instability and toxic atmospheres make it suicidal for first responders or K9 units to enter blindly.
 
-**PIPER** (Platform for Intelligent Perception & Emergency Response) is an integrated, end-to-end tactical rescue platform that bridges the gap between **autonomous quadruped robots on the ground** and **incident commanders at the base station**. PIPER provides real-time multi-modal spatial intelligence, automated victim detection, and direct civilian SOS dispatch to maximize survival during the golden hour of rescue.
+**P.E.K.A** (Platform for Emergency Kinetic Autonomy) is an integrated, end-to-end tactical rescue platform that bridges the gap between **autonomous quadruped robots on the ground** and **incident commanders at the base station**. P.E.K.A provides real-time multi-modal spatial intelligence, automated victim detection, and direct civilian SOS dispatch to maximize survival during the golden hour of rescue.
 
 ---
 
@@ -38,7 +38,7 @@ In catastrophic urban disasters (earthquakes, structural collapses, mine entrapm
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        PIPER CORE CAPABILITIES                         │
+│                        P.E.K.A CORE CAPABILITIES                       │
 ├─────────────────────┬────────────────────┬─────────────────────────────┤
 │ 🎮 Teleoperation    │ 🌐 3D LiDAR SLAM   │ 🗺️ RTAB-Map 2D Grid        │
 │    Low-latency ROS2 │    Point-LIO WebGL │    Dynamic metric scaling   │
@@ -110,7 +110,7 @@ flowchart TB
         JETSON <--> ROSBRIDGE <--> TACTICAL
     end
 
-    subgraph BACKEND["⚡ PIPER Mission Controller Core (FastAPI)"]
+    subgraph BACKEND["⚡ P.E.K.A Mission Controller Core (FastAPI)"]
         FASTAPI["FastAPI Async Gateway (:8000)"]
         ROUTER_ROBOT["Robot Teleop & Status"]
         ROUTER_MAP["2D RTAB-Map & 3D PCD"]
@@ -139,9 +139,9 @@ flowchart TB
 
 ## 📡 Disaster-Resilient Communication (Zero-Wi-Fi)
 
-> *"In an earthquake or collapsed building, home Wi-Fi is destroyed. How does PIPER survive in a real hazard zone?"*
+> *"In an earthquake or collapsed building, home Wi-Fi is destroyed. How does P.E.K.A survive in a real hazard zone?"*
 
-PIPER is engineered with a **3-Tier Resilient Architecture**:
+P.E.K.A is engineered with a **3-Tier Resilient Architecture**:
 
 1. **100% On-Board Edge Autonomy (Mars Rover Principle)**:
    - All mapping (Point-LIO + RTAB-Map), obstacle avoidance, and survivor detection run **locally on the robot's Jetson Orin**.
